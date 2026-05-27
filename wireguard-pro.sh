@@ -157,7 +157,7 @@ prompt() {
   else
     prompt_str="  ${C}▶${RST}  ${W}${msg}${RST}: "
   fi
-  printf "%s" "$prompt_str"
+  printf "%b" "$prompt_str"
   if [[ "$secret" == "yes" ]]; then
     IFS= read -rs REPLY_VAL 2>/dev/null || REPLY_VAL=""
     nl
@@ -1405,9 +1405,9 @@ verify_internet_routing() {
   fw_save
 
   # Test internet from server
-  if ping -c 2 -W 3 1.1.1.1 &>/dev/null 2>&1; then
+  if curl -sk -m 3 https://1.1.1.1 > /dev/null 2>&1; then
     log "Server internet connectivity: OK ✔"
-  elif ping -c 2 -W 3 8.8.8.8 &>/dev/null 2>&1; then
+  elif curl -sk -m 3 https://8.8.8.8 > /dev/null 2>&1; then
     log "Server internet connectivity: OK ✔"
   else
     warn "Server cannot reach internet — check cloud security group"
