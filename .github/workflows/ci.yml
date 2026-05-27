@@ -1,0 +1,45 @@
+name: CI — Lint & Validate
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  shellcheck:
+    name: ShellCheck Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck
+        run: shellcheck --severity=warning wireguard-pro.sh
+
+  syntax:
+    name: Bash Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bash syntax check
+        run: bash -n wireguard-pro.sh && echo "✔ Syntax OK"
+
+      - name: Check script is executable
+        run: |
+          chmod +x wireguard-pro.sh
+          head -1 wireguard-pro.sh | grep -q "bash" && echo "✔ Shebang OK"
+
+  markdown:
+    name: Markdown Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: articulate/actions-markdownlint@v1
+        with:
+          config: .markdownlint.json
+          files: '**/*.md'
+        continue-on-error: true
