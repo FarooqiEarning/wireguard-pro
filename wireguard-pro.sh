@@ -51,7 +51,7 @@ fi
 readonly LOG_FILE="/var/log/wireguard-pro.log"
 mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
 exec > >(tee -a "$LOG_FILE") 2>&1
-printf '\n%s\n' "═══ Session: $(date -u '+%Y-%m-%d %H:%M:%S UTC')  v${VER}  PID:${SCRIPT_PID} ═══" >> "$LOG_FILE"
+printf '\n%b\n' "═══ Session: $(date -u '+%Y-%m-%d %H:%M:%b UTC')  v${VER}  PID:${SCRIPT_PID} ═══" >> "$LOG_FILE"
 
 log()    { printf "  ${G}✔${RST}  ${W}%b${RST}\n"         "$*"; }
 info()   { printf "  ${C}◆${RST}  ${C}%b${RST}\n"          "$*"; }
@@ -60,8 +60,8 @@ step()   { printf "  ${M}⚙${RST}  ${M}%b${RST}\n"          "$*"; }
 die()    { printf "\n  ${R}✘${RST}  ${R}${BOLD}FATAL: %b${RST}\n\n" "$*" >&2; exit 1; }
 abort()  { printf "\n  ${Y}⚠${RST}  ${Y}%b${RST}\n\n"     "$*"; exit 0; }
 nl()     { printf '\n'; }
-hr()     { printf "  ${DIM}%s${RST}\n" "────────────────────────────────────────────────────────────────"; }
-dhr()    { printf "  ${C}%s${RST}\n"   "════════════════════════════════════════════════════════════════"; }
+hr()     { printf "  ${DIM}%b${RST}\n" "────────────────────────────────────────────────────────────────"; }
+dhr()    { printf "  ${C}%b${RST}\n"   "════════════════════════════════════════════════════════════════"; }
 section(){ nl; hr; printf "  ${BOLD}${C}%b${RST}\n" "$*"; hr; nl; }
 label()  { printf "  ${DIM}%-24s${RST}: ${W}%b${RST}\n" "$1" "$2"; }
 
@@ -220,7 +220,7 @@ db_init() {
 db_add() {
   local name="$1" vpn_ip="$2" pubkey="$3"
   local created; created=$(date -u '+%Y-%m-%d')
-  printf '%s|%s|%s|%s|active\n' "$name" "$vpn_ip" "$pubkey" "$created" >> "$DB_FILE"
+  printf '%b|%b|%b|%b|active\n' "$name" "$vpn_ip" "$pubkey" "$created" >> "$DB_FILE"
 }
 
 # Remove a client record by name
@@ -279,7 +279,7 @@ db_list() {
   while IFS='|' read -r name vpn_ip pubkey created status; do
     local col="${G}"
     [[ "$status" == "revoked" ]] && col="${R}"
-    printf "  ${C}%-5s${RST}  ${W}%-20s${RST}  ${C}%-14s${RST}  ${DIM}%-12s${RST}  %s%-10s${RST}\n" \
+    printf "  ${C}%-5s${RST}  ${W}%-20s${RST}  ${C}%-14s${RST}  ${DIM}%-12s${RST}  %b%-10s${RST}\n" \
       "$i" "$name" "$vpn_ip" "$created" "$col" "$status"
     ((i++)) || true
   done <<< "$clients"
@@ -1030,19 +1030,19 @@ fw_save() {
     printf 'ip6tables -P FORWARD ACCEPT 2>/dev/null || true\n'
     printf 'echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null || true\n'
     printf 'echo 1 > /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || true\n'
-    printf 'iptables -C INPUT -p udp --dport %s -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p udp --dport %s -j ACCEPT\n' \
+    printf 'iptables -C INPUT -p udp --dport %b -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p udp --dport %b -j ACCEPT\n' \
       "${WG_PORT}" "${WG_PORT}"
-    printf 'ip6tables -C INPUT -p udp --dport %s -j ACCEPT 2>/dev/null || ip6tables -I INPUT 1 -p udp --dport %s -j ACCEPT\n' \
+    printf 'ip6tables -C INPUT -p udp --dport %b -j ACCEPT 2>/dev/null || ip6tables -I INPUT 1 -p udp --dport %b -j ACCEPT\n' \
       "${WG_PORT}" "${WG_PORT}"
-    printf 'iptables -t nat -C POSTROUTING -o %s -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o %s -j MASQUERADE\n' \
+    printf 'iptables -t nat -C POSTROUTING -o %b -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o %b -j MASQUERADE\n' \
       "${PUBLIC_IFACE}" "${PUBLIC_IFACE}"
-    printf 'iptables -C FORWARD -i %s -j ACCEPT 2>/dev/null || iptables -A FORWARD -i %s -j ACCEPT\n' \
+    printf 'iptables -C FORWARD -i %b -j ACCEPT 2>/dev/null || iptables -A FORWARD -i %b -j ACCEPT\n' \
       "${WG_IFACE}" "${WG_IFACE}"
-    printf 'iptables -C FORWARD -o %s -j ACCEPT 2>/dev/null || iptables -A FORWARD -o %s -j ACCEPT\n' \
+    printf 'iptables -C FORWARD -o %b -j ACCEPT 2>/dev/null || iptables -A FORWARD -o %b -j ACCEPT\n' \
       "${WG_IFACE}" "${WG_IFACE}"
-    printf 'ip6tables -C FORWARD -i %s -j ACCEPT 2>/dev/null || ip6tables -A FORWARD -i %s -j ACCEPT\n' \
+    printf 'ip6tables -C FORWARD -i %b -j ACCEPT 2>/dev/null || ip6tables -A FORWARD -i %b -j ACCEPT\n' \
       "${WG_IFACE}" "${WG_IFACE}"
-    printf 'ip6tables -C FORWARD -o %s -j ACCEPT 2>/dev/null || ip6tables -A FORWARD -o %s -j ACCEPT\n' \
+    printf 'ip6tables -C FORWARD -o %b -j ACCEPT 2>/dev/null || ip6tables -A FORWARD -o %b -j ACCEPT\n' \
       "${WG_IFACE}" "${WG_IFACE}"
   } > "$rules_script" 2>/dev/null && chmod 700 "$rules_script"
 
@@ -1530,20 +1530,20 @@ ip6tables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-
   {
     printf '# ══════════════════════════════════════════════════════════════════════\n'
     printf '#  WireGuard Pro — Server Config\n'
-    printf '#  Generated : %s\n' "$(date -u '+%Y-%m-%d %H:%M UTC')"
-    printf '#  Server IP : %s | Interface: %s | Port: %s\n' \
+    printf '#  Generated : %b\n' "$(date -u '+%Y-%m-%d %H:%M UTC')"
+    printf '#  Server IP : %b | Interface: %b | Port: %b\n' \
       "$SERVER_PUBLIC_IP" "$PUBLIC_IFACE" "$WG_PORT"
-    printf '#  Profile   : %s | MTU: %s | Subnet: %s.0/24\n' \
+    printf '#  Profile   : %b | MTU: %b | Subnet: %b.0/24\n' \
       "$PERF_PROFILE" "$MTU" "$WG_NET"
-    [[ -n "$SETUP_NOTE" ]] && printf '#  Note      : %s\n' "$SETUP_NOTE"
+    [[ -n "$SETUP_NOTE" ]] && printf '#  Note      : %b\n' "$SETUP_NOTE"
     printf '# ══════════════════════════════════════════════════════════════════════\n\n'
     printf '[Interface]\n'
-    printf 'Address    = %s/24\n' "${WG_NET}.1"
-    printf 'ListenPort = %s\n'    "$WG_PORT"
-    printf 'PrivateKey = %s\n'    "$SERVER_PRIV"
-    printf 'MTU        = %s\n'    "$MTU"
-    printf 'PostUp     = %s\n'    "$postup"
-    printf 'PostDown   = %s\n'    "$postdown"
+    printf 'Address    = %b/24\n' "${WG_NET}.1"
+    printf 'ListenPort = %b\n'    "$WG_PORT"
+    printf 'PrivateKey = %b\n'    "$SERVER_PRIV"
+    printf 'MTU        = %b\n'    "$MTU"
+    printf 'PostUp     = %b\n'    "$postup"
+    printf 'PostDown   = %b\n'    "$postdown"
   } > "$WG_CONF"
 
   # Append all peer blocks
@@ -1554,10 +1554,10 @@ ip6tables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-
     local vpn_ip="${WG_NET}.$((i+2))"
     {
       printf '\n[Peer]\n'
-      printf '# %s\n'          "$name"
-      printf 'PublicKey    = %s\n' "${CLIENT_PUBS[$i]}"
-      printf 'PresharedKey = %s\n' "${CLIENT_PSKS[$i]}"
-      printf 'AllowedIPs   = %s/32\n' "$vpn_ip"
+      printf '# %b\n'          "$name"
+      printf 'PublicKey    = %b\n' "${CLIENT_PUBS[$i]}"
+      printf 'PresharedKey = %b\n' "${CLIENT_PSKS[$i]}"
+      printf 'AllowedIPs   = %b/32\n' "$vpn_ip"
     } >> "$WG_CONF"
     # Register in DB
     db_add "$name" "$vpn_ip" "${CLIENT_PUBS[$i]}"
@@ -1599,19 +1599,19 @@ write_client_configs() {
 
     {
       printf '# ══════════════════════════════════════════════════════════════════════\n'
-      printf '#  WireGuard Pro — Client Config: %s\n' "$name"
-      printf '#  Server    : %s:%s\n' "$SERVER_PUBLIC_IP" "$WG_PORT"
-      printf '#  Generated : %s\n' "$(date -u '+%Y-%m-%d %H:%M UTC')"
-      printf '#  Profile   : %s\n' "$PERF_PROFILE"
-      [[ -n "$SETUP_NOTE" ]] && printf '#  Note      : %s\n' "$SETUP_NOTE"
+      printf '#  WireGuard Pro — Client Config: %b\n' "$name"
+      printf '#  Server    : %b:%b\n' "$SERVER_PUBLIC_IP" "$WG_PORT"
+      printf '#  Generated : %b\n' "$(date -u '+%Y-%m-%d %H:%M UTC')"
+      printf '#  Profile   : %b\n' "$PERF_PROFILE"
+      [[ -n "$SETUP_NOTE" ]] && printf '#  Note      : %b\n' "$SETUP_NOTE"
       printf '#  Import into: Windows · Android · iOS · macOS · Linux\n'
       printf '# ══════════════════════════════════════════════════════════════════════\n\n'
 
       printf '[Interface]\n'
-      printf 'PrivateKey = %s\n' "${CLIENT_PRIVS[$i]}"
-      printf 'Address    = %s/24\n' "$vpn_ip"
-      printf 'DNS        = %s\n' "$CLIENT_DNS"
-      printf 'MTU        = %s\n' "$MTU"
+      printf 'PrivateKey = %b\n' "${CLIENT_PRIVS[$i]}"
+      printf 'Address    = %b/24\n' "$vpn_ip"
+      printf 'DNS        = %b\n' "$CLIENT_DNS"
+      printf 'MTU        = %b\n' "$MTU"
 
       # Kill switch
       if "${KILL_SWITCH}"; then
@@ -1622,11 +1622,11 @@ write_client_configs() {
 
       printf '\n[Peer]\n'
       printf '# Server\n'
-      printf 'PublicKey           = %s\n' "$SERVER_PUB"
-      printf 'PresharedKey        = %s\n' "${CLIENT_PSKS[$i]}"
-      printf 'Endpoint            = %s:%s\n' "$SERVER_PUBLIC_IP" "$WG_PORT"
-      printf 'AllowedIPs          = %s\n' "$allowed_ips"
-      printf 'PersistentKeepalive = %s\n' "$KEEPALIVE"
+      printf 'PublicKey           = %b\n' "$SERVER_PUB"
+      printf 'PresharedKey        = %b\n' "${CLIENT_PSKS[$i]}"
+      printf 'Endpoint            = %b:%b\n' "$SERVER_PUBLIC_IP" "$WG_PORT"
+      printf 'AllowedIPs          = %b\n' "$allowed_ips"
+      printf 'PersistentKeepalive = %b\n' "$KEEPALIVE"
     } > "$client_file"
 
     chmod 600 "$client_file"
@@ -1746,17 +1746,17 @@ _auto_repair() {
     warn "  → Config parse error — rebuilding cleanly"
     {
       printf '[Interface]\n'
-      printf 'Address    = %s/24\n' "${WG_NET}.1"
-      printf 'ListenPort = %s\n'    "$WG_PORT"
-      printf 'PrivateKey = %s\n'    "$SERVER_PRIV"
-      printf 'MTU        = %s\n'    "$MTU"
-      printf 'PostUp     = sysctl -w net.ipv4.ip_forward=1; iptables -P FORWARD ACCEPT; iptables -t nat -A POSTROUTING -o %s -j MASQUERADE; iptables -A FORWARD -i %%i -j ACCEPT; iptables -A FORWARD -o %%i -j ACCEPT\n' "$PUBLIC_IFACE"
-      printf 'PostDown   = iptables -P FORWARD ACCEPT; iptables -t nat -D POSTROUTING -o %s -j MASQUERADE; iptables -D FORWARD -i %%i -j ACCEPT; iptables -D FORWARD -o %%i -j ACCEPT\n' "$PUBLIC_IFACE"
+      printf 'Address    = %b/24\n' "${WG_NET}.1"
+      printf 'ListenPort = %b\n'    "$WG_PORT"
+      printf 'PrivateKey = %b\n'    "$SERVER_PRIV"
+      printf 'MTU        = %b\n'    "$MTU"
+      printf 'PostUp     = sysctl -w net.ipv4.ip_forward=1; iptables -P FORWARD ACCEPT; iptables -t nat -A POSTROUTING -o %b -j MASQUERADE; iptables -A FORWARD -i %%i -j ACCEPT; iptables -A FORWARD -o %%i -j ACCEPT\n' "$PUBLIC_IFACE"
+      printf 'PostDown   = iptables -P FORWARD ACCEPT; iptables -t nat -D POSTROUTING -o %b -j MASQUERADE; iptables -D FORWARD -i %%i -j ACCEPT; iptables -D FORWARD -o %%i -j ACCEPT\n' "$PUBLIC_IFACE"
     } > "${WG_CONF}"
     local ri=0
     while [[ $ri -lt $NUM_CLIENTS ]]; do
       local rn=$((ri+1)) rv="${WG_NET}.$((ri+2))"
-      printf '\n[Peer]\n# client%d\nPublicKey    = %s\nPresharedKey = %s\nAllowedIPs   = %s/32\n' \
+      printf '\n[Peer]\n# client%d\nPublicKey    = %b\nPresharedKey = %b\nAllowedIPs   = %b/32\n' \
         "$rn" "${CLIENT_PUBS[$ri]}" "${CLIENT_PSKS[$ri]}" "$rv" >> "${WG_CONF}"
       ((ri++)) || true
     done
@@ -1911,7 +1911,7 @@ run_verification() {
       printf "    ${G}✔${RST}  %-40s\n" "$label"
       ((pass++)) || true
     else
-      printf "    ${R}✘${RST}  ${R}%-40s${RST}  ${DIM}%s${RST}\n" "$label" "$hint"
+      printf "    ${R}✘${RST}  ${R}%-40s${RST}  ${DIM}%b${RST}\n" "$label" "$hint"
       ((fail++)) || true
     fi
   }
@@ -1970,14 +1970,14 @@ cleanup_old_install() {
 
   # Back up old config
   if [[ -f "${WG_CONF}" ]]; then
-    local bak="${WG_CONF}.bak.$(date +%s)"
+    local bak="${WG_CONF}.bak.$(date +%b)"
     cp "${WG_CONF}" "$bak" 2>/dev/null || true
     info "Old config backed up: ${bak}"
     rm -f "${WG_CONF}"
   fi
 
   # Reset client database
-  [[ -f "$DB_FILE" ]] && mv "$DB_FILE" "${DB_FILE}.bak.$(date +%s)" 2>/dev/null || true
+  [[ -f "$DB_FILE" ]] && mv "$DB_FILE" "${DB_FILE}.bak.$(date +%b)" 2>/dev/null || true
 
   log "Cleanup complete"
 }
@@ -1987,18 +1987,18 @@ cleanup_old_install() {
 # ══════════════════════════════════════════════════════════════════════════════
 show_install_summary() {
   nl; dhr
-  printf "  ${C}${BOLD}%s${RST}\n" "  🎉  WireGuard Pro — Setup Complete!"
+  printf "  ${C}${BOLD}%b${RST}\n" "  🎉  WireGuard Pro — Setup Complete!"
   dhr
-  printf "  ${DIM}%-22s${RST}: ${W}%s${RST}\n"  "Server IP"     "$SERVER_PUBLIC_IP"
-  printf "  ${DIM}%-22s${RST}: ${W}%s${RST}\n"  "Interface"     "$PUBLIC_IFACE"
-  printf "  ${DIM}%-22s${RST}: ${G}%s/UDP${RST}\n" "VPN Port"  "$WG_PORT"
-  printf "  ${DIM}%-22s${RST}: ${C}%s.0/24${RST}\n" "VPN Subnet" "$WG_NET"
-  printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "DNS"           "$CLIENT_DNS"
-  printf "  ${DIM}%-22s${RST}: ${G}%s${RST}\n"  "Clients"       "$NUM_CLIENTS"
-  printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "Routing"       "${ALLOWED_IPS_MODE} tunnel"
-  printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "Performance"   "${PERF_PROFILE}"
-  printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "Kill Switch"   "${KILL_SWITCH}"
-  printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "MTU"           "$MTU"
+  printf "  ${DIM}%-22s${RST}: ${W}%b${RST}\n"  "Server IP"     "$SERVER_PUBLIC_IP"
+  printf "  ${DIM}%-22s${RST}: ${W}%b${RST}\n"  "Interface"     "$PUBLIC_IFACE"
+  printf "  ${DIM}%-22s${RST}: ${G}%b/UDP${RST}\n" "VPN Port"  "$WG_PORT"
+  printf "  ${DIM}%-22s${RST}: ${C}%b.0/24${RST}\n" "VPN Subnet" "$WG_NET"
+  printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "DNS"           "$CLIENT_DNS"
+  printf "  ${DIM}%-22s${RST}: ${G}%b${RST}\n"  "Clients"       "$NUM_CLIENTS"
+  printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "Routing"       "${ALLOWED_IPS_MODE} tunnel"
+  printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "Performance"   "${PERF_PROFILE}"
+  printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "Kill Switch"   "${KILL_SWITCH}"
+  printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "MTU"           "$MTU"
   dhr
 
   nl; printf "  ${W}${BOLD}Client Config Files:${RST}\n"; hr
@@ -2006,40 +2006,40 @@ show_install_summary() {
     [[ -f "$f" ]] || continue
     local name; name=$(basename "$f" .conf)
     local qr="${CLIENT_DIR}/${name}.qr.txt"
-    printf "  ${C}▶${RST}  ${W}%s${RST}\n" "$f"
-    [[ -f "$qr" ]] && printf "     ${DIM}QR: %s${RST}\n" "$qr"
+    printf "  ${C}▶${RST}  ${W}%b${RST}\n" "$f"
+    [[ -f "$qr" ]] && printf "     ${DIM}QR: %b${RST}\n" "$qr"
   done
   hr
 
   nl; printf "  ${W}${BOLD}Quick Commands:${RST}\n"; hr
-  printf "  ${C}▶${RST}  Status dashboard   : ${W}sudo bash %s${RST}\n" "$SCRIPT_NAME"
+  printf "  ${C}▶${RST}  Status dashboard   : ${W}sudo bash %b${RST}\n" "$SCRIPT_NAME"
   printf "  ${C}▶${RST}  WireGuard status   : ${W}sudo wg show${RST}\n"
   printf "  ${C}▶${RST}  Restart VPN        : ${W}sudo systemctl restart wg-quick@${WG_IFACE}${RST}\n"
   printf "  ${C}▶${RST}  Live traffic       : ${W}sudo wg show ${WG_IFACE} transfer${RST}\n"
   printf "  ${C}▶${RST}  View logs          : ${W}journalctl -xeu wg-quick@${WG_IFACE}${RST}\n"
-  printf "  ${C}▶${RST}  Add client         : ${W}sudo bash %s${RST}\n" "$SCRIPT_NAME"
+  printf "  ${C}▶${RST}  Add client         : ${W}sudo bash %b${RST}\n" "$SCRIPT_NAME"
   hr
 
   nl; printf "  ${W}${BOLD}Transfer configs to your device:${RST}\n"; hr
   for f in "${CLIENT_DIR}"/*.conf; do
     [[ -f "$f" ]] || continue
-    printf "  ${DIM}scp root@%s:%s ./%s${RST}\n" \
+    printf "  ${DIM}scp root@%b:%b ./%b${RST}\n" \
       "$SERVER_PUBLIC_IP" "$f" "$(basename "$f")"
   done
   hr
 
   if [[ "$CLOUD_PROVIDER" != "generic" ]]; then
     nl
-    printf "  ${Y}${BOLD}⚠  IMPORTANT — Open UDP port %s in your %s firewall:${RST}\n" \
+    printf "  ${Y}${BOLD}⚠  IMPORTANT — Open UDP port %b in your %b firewall:${RST}\n" \
       "$WG_PORT" "${CLOUD_PROVIDER^^}"
     case "$CLOUD_PROVIDER" in
       oracle)        printf "  ${DIM}  OCI → Networking → VCN → Security Lists → Add Ingress Rule${RST}\n" ;;
-      aws)           printf "  ${DIM}  EC2 → Security Groups → Inbound Rules → Add UDP %s${RST}\n" "$WG_PORT" ;;
-      gcp)           printf "  ${DIM}  VPC Network → Firewall → Create Rule → UDP %s${RST}\n" "$WG_PORT" ;;
-      azure)         printf "  ${DIM}  NSG → Inbound Security Rules → Add UDP %s${RST}\n" "$WG_PORT" ;;
-      digitalocean)  printf "  ${DIM}  Droplet → Networking → Firewalls → Add UDP %s${RST}\n" "$WG_PORT" ;;
-      hetzner)       printf "  ${DIM}  Firewall → Add Inbound Rule → UDP %s${RST}\n" "$WG_PORT" ;;
-      *)             printf "  ${DIM}  Open UDP port %s in your hosting provider's firewall panel${RST}\n" "$WG_PORT" ;;
+      aws)           printf "  ${DIM}  EC2 → Security Groups → Inbound Rules → Add UDP %b${RST}\n" "$WG_PORT" ;;
+      gcp)           printf "  ${DIM}  VPC Network → Firewall → Create Rule → UDP %b${RST}\n" "$WG_PORT" ;;
+      azure)         printf "  ${DIM}  NSG → Inbound Security Rules → Add UDP %b${RST}\n" "$WG_PORT" ;;
+      digitalocean)  printf "  ${DIM}  Droplet → Networking → Firewalls → Add UDP %b${RST}\n" "$WG_PORT" ;;
+      hetzner)       printf "  ${DIM}  Firewall → Add Inbound Rule → UDP %b${RST}\n" "$WG_PORT" ;;
+      *)             printf "  ${DIM}  Open UDP port %b in your hosting provider's firewall panel${RST}\n" "$WG_PORT" ;;
     esac
   fi
 
@@ -2245,17 +2245,17 @@ run_install_wizard() {
   # ── Pre-install summary ──────────────────────────────────────────────
   nl; dhr
   printf "  ${W}${BOLD}  Configuration Summary${RST}\n"; hr
-  printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "Server IP"      "$SERVER_PUBLIC_IP"
-  printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "Network iface"  "$PUBLIC_IFACE"
-  printf "  ${DIM}%-22s${RST}: ${G}%s/UDP${RST}\n" "VPN Port"    "$WG_PORT"
-  printf "  ${DIM}%-22s${RST}: ${C}%s.0/24${RST}\n" "VPN Subnet" "$WG_NET"
-  printf "  ${DIM}%-22s${RST}: ${G}%s${RST}\n"  "Clients"        "$NUM_CLIENTS"
-  printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "DNS"            "$CLIENT_DNS"
-  printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "Routing"        "${ALLOWED_IPS_MODE} tunnel"
-  printf "  ${DIM}%-22s${RST}: ${M}%s${RST}\n"  "Performance"    "$PERF_PROFILE"
-  printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "Kill Switch"    "$KILL_SWITCH"
-  printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "MTU"            "$MTU"
-  printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "Keepalive"      "${KEEPALIVE}s"
+  printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "Server IP"      "$SERVER_PUBLIC_IP"
+  printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "Network iface"  "$PUBLIC_IFACE"
+  printf "  ${DIM}%-22s${RST}: ${G}%b/UDP${RST}\n" "VPN Port"    "$WG_PORT"
+  printf "  ${DIM}%-22s${RST}: ${C}%b.0/24${RST}\n" "VPN Subnet" "$WG_NET"
+  printf "  ${DIM}%-22s${RST}: ${G}%b${RST}\n"  "Clients"        "$NUM_CLIENTS"
+  printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "DNS"            "$CLIENT_DNS"
+  printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "Routing"        "${ALLOWED_IPS_MODE} tunnel"
+  printf "  ${DIM}%-22s${RST}: ${M}%b${RST}\n"  "Performance"    "$PERF_PROFILE"
+  printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "Kill Switch"    "$KILL_SWITCH"
+  printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "MTU"            "$MTU"
+  printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "Keepalive"      "${KEEPALIVE}s"
   dhr; nl
 
   confirm "Proceed with installation?" "y" || abort "Installation cancelled"
@@ -2332,22 +2332,22 @@ cmd_add_client() {
   mkdir -p "$CLIENT_DIR" && chmod 700 "$CLIENT_DIR"
   local client_file="${CLIENT_DIR}/${name}.conf"
   {
-    printf '# WireGuard Pro — Client Config: %s\n' "$name"
-    printf '# Server : %s:%s | Generated: %s\n\n' "$SERVER_PUBLIC_IP" "$port" "$(date -u '+%Y-%m-%d %H:%M UTC')"
+    printf '# WireGuard Pro — Client Config: %b\n' "$name"
+    printf '# Server : %b:%b | Generated: %b\n\n' "$SERVER_PUBLIC_IP" "$port" "$(date -u '+%Y-%m-%d %H:%M UTC')"
     printf '[Interface]\n'
-    printf 'PrivateKey = %s\n' "$priv"
-    printf 'Address    = %s/24\n' "$vpn_ip"
-    printf 'DNS        = %s\n' "$dns"
-    printf 'MTU        = %s\n' "$mtu"
+    printf 'PrivateKey = %b\n' "$priv"
+    printf 'Address    = %b/24\n' "$vpn_ip"
+    printf 'DNS        = %b\n' "$dns"
+    printf 'MTU        = %b\n' "$mtu"
     if [[ "$ks" == "true" ]]; then
       printf 'PostUp   = iptables -I OUTPUT ! -o %%i -m mark ! --mark $(wg show %%i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT && ip6tables -I OUTPUT ! -o %%i -m mark ! --mark $(wg show %%i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT\n'
       printf 'PreDown  = iptables -D OUTPUT ! -o %%i -m mark ! --mark $(wg show %%i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT && ip6tables -D OUTPUT ! -o %%i -m mark ! --mark $(wg show %%i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT\n'
     fi
     printf '\n[Peer]\n'
-    printf 'PublicKey           = %s\n' "$srv_pub"
-    printf 'PresharedKey        = %s\n' "$psk"
-    printf 'Endpoint            = %s:%s\n' "$SERVER_PUBLIC_IP" "$port"
-    printf 'AllowedIPs          = %s\n' "$allowed_ips"
+    printf 'PublicKey           = %b\n' "$srv_pub"
+    printf 'PresharedKey        = %b\n' "$psk"
+    printf 'Endpoint            = %b:%b\n' "$SERVER_PUBLIC_IP" "$port"
+    printf 'AllowedIPs          = %b\n' "$allowed_ips"
     printf 'PersistentKeepalive = 25\n'
   } > "$client_file"
   chmod 600 "$client_file"
@@ -2355,10 +2355,10 @@ cmd_add_client() {
   # Append peer to server config
   {
     printf '\n[Peer]\n'
-    printf '# %s\n' "$name"
-    printf 'PublicKey    = %s\n' "$pub"
-    printf 'PresharedKey = %s\n' "$psk"
-    printf 'AllowedIPs   = %s/32\n' "$vpn_ip"
+    printf '# %b\n' "$name"
+    printf 'PublicKey    = %b\n' "$pub"
+    printf 'PresharedKey = %b\n' "$psk"
+    printf 'AllowedIPs   = %b/32\n' "$vpn_ip"
   } >> "$WG_CONF"
 
   # Hot-add peer to running WireGuard (no restart needed)
@@ -2386,7 +2386,7 @@ cmd_add_client() {
   fi
 
   nl; info "Transfer to device:"
-  printf "  ${DIM}scp root@%s:%s ./%s.conf${RST}\n" "$SERVER_PUBLIC_IP" "$client_file" "$name"
+  printf "  ${DIM}scp root@%b:%b ./%b.conf${RST}\n" "$SERVER_PUBLIC_IP" "$client_file" "$name"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2421,7 +2421,7 @@ cmd_remove_client() {
     /^\[Peer\]/ { peer=1; block="" }
     peer { block = block $0 "\n" }
     peer && /^PublicKey/ && $3==pub { skip=1 }
-    /^$/ && peer { if(!skip) printf "%s\n", block; peer=0; skip=0; block=""; next }
+    /^$/ && peer { if(!skip) printf "%b\n", block; peer=0; skip=0; block=""; next }
     !peer { print }
   ' "$WG_CONF" > "$tmp" 2>/dev/null
   # Fallback: simpler removal
@@ -2469,9 +2469,9 @@ cmd_revoke_client() {
     local psk=""
     [[ -f "$client_conf" ]] && psk=$(grep '^PresharedKey' "$client_conf" | awk '{print $3}')
     {
-      printf '\n[Peer]\n# %s\nPublicKey    = %s\n' "$name" "$pubkey"
-      [[ -n "$psk" ]] && printf 'PresharedKey = %s\n' "$psk"
-      printf 'AllowedIPs   = %s/32\n' "$vpn_ip"
+      printf '\n[Peer]\n# %b\nPublicKey    = %b\n' "$name" "$pubkey"
+      [[ -n "$psk" ]] && printf 'PresharedKey = %b\n' "$psk"
+      printf 'AllowedIPs   = %b/32\n' "$vpn_ip"
     } >> "$WG_CONF"
     # Hot-add
     if wg_is_running; then
@@ -2493,7 +2493,7 @@ cmd_revoke_client() {
       /^\[Peer\]/ { peer=1; buf="" }
       peer { buf = buf $0 ORS }
       /^$/ && peer {
-        if (buf !~ pub) printf "%s", buf
+        if (buf !~ pub) printf "%b", buf
         peer=0; buf=""; next
       }
       !peer { print }
@@ -2521,14 +2521,14 @@ cmd_show_client() {
   [[ -f "$conf" ]] || die "Config not found: ${conf}"
 
   nl; dhr
-  printf "  ${W}${BOLD}Config: %s${RST}\n" "$name"
+  printf "  ${W}${BOLD}Config: %b${RST}\n" "$name"
   dhr
   # Show config (mask private key for security)
   while IFS= read -r line; do
     if echo "$line" | grep -q "PrivateKey"; then
       printf "  ${DIM}PrivateKey = [hidden for security]${RST}\n"
     else
-      printf "  %s\n" "$line"
+      printf "  %b\n" "$line"
     fi
   done < "$conf"
   dhr; nl
@@ -2545,7 +2545,7 @@ cmd_show_client() {
   fi
 
   info "Transfer command:"
-  printf "  ${DIM}scp root@%s:%s ./%s.conf${RST}\n" "$SERVER_PUBLIC_IP" "$conf" "$name"
+  printf "  ${DIM}scp root@%b:%b ./%b.conf${RST}\n" "$SERVER_PUBLIC_IP" "$conf" "$name"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2554,7 +2554,7 @@ cmd_show_client() {
 cmd_status() {
   clear 2>/dev/null || true
   dhr
-  printf "  ${C}${BOLD}WireGuard Pro — Status Dashboard${RST}   ${DIM}%s${RST}\n" "$(date '+%Y-%m-%d %H:%M:%S')"
+  printf "  ${C}${BOLD}WireGuard Pro — Status Dashboard${RST}   ${DIM}%b${RST}\n" "$(date '+%Y-%m-%d %H:%M:%b')"
   dhr; nl
 
   # Service status
@@ -2572,10 +2572,10 @@ cmd_status() {
     local listen_port; listen_port=$(wg show "${WG_IFACE}" listen-port 2>/dev/null)
     local pub_key; pub_key=$(wg show "${WG_IFACE}" public-key 2>/dev/null)
 
-    printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "Interface"      "${WG_IFACE}"
-    printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "VPN IP"         "${wg_addr:-unknown}"
-    printf "  ${DIM}%-22s${RST}: ${G}%s/UDP${RST}\n" "Listen Port"  "${listen_port:-unknown}"
-    printf "  ${DIM}%-22s${RST}: ${DIM}%s${RST}\n"  "Public Key"    "${pub_key:0:20}..."
+    printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "Interface"      "${WG_IFACE}"
+    printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "VPN IP"         "${wg_addr:-unknown}"
+    printf "  ${DIM}%-22s${RST}: ${G}%b/UDP${RST}\n" "Listen Port"  "${listen_port:-unknown}"
+    printf "  ${DIM}%-22s${RST}: ${DIM}%b${RST}\n"  "Public Key"    "${pub_key:0:20}..."
     nl
   fi
 
@@ -2628,16 +2628,16 @@ cmd_status() {
   [[ -n "$mem_total" ]] && [[ $mem_total -gt 0 ]] && \
     mem_pct=$(( (mem_total - mem_used) * 100 / mem_total ))
 
-  printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "CPU load (1m)"    "${cpu_load:-unknown}"
-  printf "  ${DIM}%-22s${RST}: ${C}%s%%${RST}\n" "Memory used"     "${mem_pct}"
-  printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "ip_forward"       "$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)"
-  printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "Active clients"   "$(db_count)"
+  printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "CPU load (1m)"    "${cpu_load:-unknown}"
+  printf "  ${DIM}%-22s${RST}: ${C}%b%%${RST}\n" "Memory used"     "${mem_pct}"
+  printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "ip_forward"       "$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)"
+  printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "Active clients"   "$(db_count)"
 
   # BBR check
   local cc; cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "unknown")
   local qdisc; qdisc=$(tc qdisc show dev "${WG_IFACE}" 2>/dev/null | head -1 || echo "unknown")
-  printf "  ${DIM}%-22s${RST}: ${G}%s${RST}\n"  "Congestion ctrl"  "$cc"
-  printf "  ${DIM}%-22s${RST}: ${C}%s${RST}\n"  "qdisc (wg0)"      "$qdisc"
+  printf "  ${DIM}%-22s${RST}: ${G}%b${RST}\n"  "Congestion ctrl"  "$cc"
+  printf "  ${DIM}%-22s${RST}: ${C}%b${RST}\n"  "qdisc (wg0)"      "$qdisc"
   hr; nl
 
   # Quick actions
@@ -2657,7 +2657,7 @@ _print_peer_row() {
   [[ "$handshake" =~ "hour"   ]] && hs_col="${Y}"
   [[ -z "$handshake" ]]          && hs_col="${R}" && handshake="never"
 
-  printf "  ${W}%-18s${RST}  ${C}%-16s${RST}  %s%-20s${RST}  ${DIM}↓%s ↑%s${RST}\n" \
+  printf "  ${W}%-18s${RST}  ${C}%-16s${RST}  %b%-20s${RST}  ${DIM}↓%b ↑%b${RST}\n" \
     "$peer_name" "${allowed:-?}" "$hs_col" "${handshake:0:18}" \
     "${rx:-0 B}" "${tx:-0 B}"
 }
@@ -2734,7 +2734,7 @@ cmd_backup() {
   section "◈ Backup WireGuard Configuration"
 
   local backup_dir="/root/wireguard-backups"
-  local ts; ts=$(date '+%Y%m%d_%H%M%S')
+  local ts; ts=$(date '+%Y%m%d_%H%M%b')
   local archive="${backup_dir}/wg-backup-${ts}.tar.gz"
 
   mkdir -p "$backup_dir" && chmod 700 "$backup_dir"
@@ -2755,8 +2755,8 @@ cmd_backup() {
     info "Backup size: ${size}"
     nl
     info "To restore on another server:"
-    printf "  ${DIM}scp root@SERVER:%s ./backup.tar.gz${RST}\n" "$archive"
-    printf "  ${DIM}sudo bash %s --restore ./backup.tar.gz${RST}\n" "$SCRIPT_NAME"
+    printf "  ${DIM}scp root@SERVER:%b ./backup.tar.gz${RST}\n" "$archive"
+    printf "  ${DIM}sudo bash %b --restore ./backup.tar.gz${RST}\n" "$SCRIPT_NAME"
   else
     warn "Backup creation had issues — check permissions"
   fi
@@ -2948,7 +2948,7 @@ management_menu() {
     local port; port=$(grep '^ListenPort' "$WG_CONF" 2>/dev/null | awk '{print $3}')
     local client_count; client_count=$(db_count 2>/dev/null || echo "?")
 
-    printf "  ${DIM}Server: ${W}%s${RST}  ${DIM}|  Port: ${G}%s/UDP${RST}  ${DIM}|  Clients: ${W}%s${RST}  ${DIM}|  Status: %s${BOLD}● %s${RST}\n\n" \
+    printf "  ${DIM}Server: ${W}%b${RST}  ${DIM}|  Port: ${G}%b/UDP${RST}  ${DIM}|  Clients: ${W}%b${RST}  ${DIM}|  Status: %b${BOLD}● %b${RST}\n\n" \
       "${SERVER_PUBLIC_IP:-?}" "${port:-?}" "$client_count" "$svc_color" "$svc_label"
 
     dhr
@@ -3000,16 +3000,16 @@ management_menu() {
 # ══════════════════════════════════════════════════════════════════════════════
 usage() {
   printf "\n  ${W}${BOLD}WireGuard Pro v${VER} — Usage${RST}\n\n"
-  printf "  ${C}sudo bash %s${RST}               Interactive (auto-detects install vs manage)\n" "$SCRIPT_NAME"
-  printf "  ${C}sudo bash %s --auto${RST}         Fully automatic install (zero interaction)\n" "$SCRIPT_NAME"
-  printf "  ${C}sudo bash %s --status${RST}       Show status dashboard\n" "$SCRIPT_NAME"
-  printf "  ${C}sudo bash %s --add-client${RST}   Add a new client interactively\n" "$SCRIPT_NAME"
-  printf "  ${C}sudo bash %s --backup${RST}       Backup all configs\n" "$SCRIPT_NAME"
-  printf "  ${C}sudo bash %s --restore FILE${RST} Restore from backup archive\n" "$SCRIPT_NAME"
-  printf "  ${C}sudo bash %s --repair${RST}       Repair and restart WireGuard\n" "$SCRIPT_NAME"
-  printf "  ${C}sudo bash %s --uninstall${RST}    Completely remove WireGuard\n" "$SCRIPT_NAME"
-  printf "  ${C}sudo bash %s --update${RST}       Update this script\n" "$SCRIPT_NAME"
-  printf "  ${C}sudo bash %s --help${RST}         Show this help\n\n" "$SCRIPT_NAME"
+  printf "  ${C}sudo bash %b${RST}               Interactive (auto-detects install vs manage)\n" "$SCRIPT_NAME"
+  printf "  ${C}sudo bash %b --auto${RST}         Fully automatic install (zero interaction)\n" "$SCRIPT_NAME"
+  printf "  ${C}sudo bash %b --status${RST}       Show status dashboard\n" "$SCRIPT_NAME"
+  printf "  ${C}sudo bash %b --add-client${RST}   Add a new client interactively\n" "$SCRIPT_NAME"
+  printf "  ${C}sudo bash %b --backup${RST}       Backup all configs\n" "$SCRIPT_NAME"
+  printf "  ${C}sudo bash %b --restore FILE${RST} Restore from backup archive\n" "$SCRIPT_NAME"
+  printf "  ${C}sudo bash %b --repair${RST}       Repair and restart WireGuard\n" "$SCRIPT_NAME"
+  printf "  ${C}sudo bash %b --uninstall${RST}    Completely remove WireGuard\n" "$SCRIPT_NAME"
+  printf "  ${C}sudo bash %b --update${RST}       Update this script\n" "$SCRIPT_NAME"
+  printf "  ${C}sudo bash %b --help${RST}         Show this help\n\n" "$SCRIPT_NAME"
 }
 
 main() {
