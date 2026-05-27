@@ -53,17 +53,17 @@ mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
 exec > >(tee -a "$LOG_FILE") 2>&1
 printf '\n%s\n' "═══ Session: $(date -u '+%Y-%m-%d %H:%M:%S UTC')  v${VER}  PID:${SCRIPT_PID} ═══" >> "$LOG_FILE"
 
-log()    { printf "  ${G}✔${RST}  ${W}%s${RST}\n"         "$*"; }
-info()   { printf "  ${C}◆${RST}  ${C}%s${RST}\n"          "$*"; }
-warn()   { printf "  ${Y}⚠${RST}  ${Y}%s${RST}\n"          "$*"; }
-step()   { printf "  ${M}⚙${RST}  ${M}%s${RST}\n"          "$*"; }
-die()    { printf "\n  ${R}✘${RST}  ${R}${BOLD}FATAL: %s${RST}\n\n" "$*" >&2; exit 1; }
-abort()  { printf "\n  ${Y}⚠${RST}  ${Y}%s${RST}\n\n"     "$*"; exit 0; }
+log()    { printf "  ${G}✔${RST}  ${W}%b${RST}\n"         "$*"; }
+info()   { printf "  ${C}◆${RST}  ${C}%b${RST}\n"          "$*"; }
+warn()   { printf "  ${Y}⚠${RST}  ${Y}%b${RST}\n"          "$*"; }
+step()   { printf "  ${M}⚙${RST}  ${M}%b${RST}\n"          "$*"; }
+die()    { printf "\n  ${R}✘${RST}  ${R}${BOLD}FATAL: %b${RST}\n\n" "$*" >&2; exit 1; }
+abort()  { printf "\n  ${Y}⚠${RST}  ${Y}%b${RST}\n\n"     "$*"; exit 0; }
 nl()     { printf '\n'; }
 hr()     { printf "  ${DIM}%s${RST}\n" "────────────────────────────────────────────────────────────────"; }
 dhr()    { printf "  ${C}%s${RST}\n"   "════════════════════════════════════════════════════════════════"; }
-section(){ nl; hr; printf "  ${BOLD}${C}%s${RST}\n" "$*"; hr; nl; }
-label()  { printf "  ${DIM}%-24s${RST}: ${W}%s${RST}\n" "$1" "$2"; }
+section(){ nl; hr; printf "  ${BOLD}${C}%b${RST}\n" "$*"; hr; nl; }
+label()  { printf "  ${DIM}%-24s${RST}: ${W}%b${RST}\n" "$1" "$2"; }
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  §3  GLOBALS  (populated by detection functions)
@@ -172,7 +172,7 @@ confirm() {
   local msg="${1}" default="${2:-y}"
   local suffix
   if [[ "${default,,}" == "y" ]]; then suffix="${G}[Y/n]${RST}"; else suffix="${Y}[y/N]${RST}"; fi
-  printf "  ${C}▶${RST}  ${W}%s${RST} %s: " "$msg" "$suffix"
+  printf "  ${C}▶${RST}  ${W}%b${RST} %b: " "$msg" "$suffix"
   local ans; IFS= read -r ans 2>/dev/null || ans=""
   [[ -z "$ans" ]] && ans="$default"
   [[ "${ans,,}" =~ ^y(es)?$ ]]
@@ -183,11 +183,11 @@ menu() {
   local title="$1"; shift
   local opts=("$@")
   nl
-  printf "  ${BOLD}${W}%s${RST}\n" "$title"
+  printf "  ${BOLD}${W}%b${RST}\n" "$title"
   hr
   local i=1
   for opt in "${opts[@]}"; do
-    printf "  ${C}[%d]${RST}  %s\n" "$i" "$opt"
+    printf "  ${C}[%d]${RST}  %b\n" "$i" "$opt"
     ((i++)) || true
   done
   printf "  ${C}[0]${RST}  ${DIM}Exit / Cancel${RST}\n"
@@ -197,7 +197,7 @@ menu() {
 }
 
 # Spinner for long-running operations
-spin_start() { printf "  ${M}⚙${RST}  ${M}%s...${RST}  " "$1"; _SPIN_MSG="$1"; }
+spin_start() { printf "  ${M}⚙${RST}  ${M}%b...${RST}  " "$1"; _SPIN_MSG="$1"; }
 spin_stop()  {
   local rc="${1:-0}"
   if [[ "$rc" -eq 0 ]]; then printf "${G}done${RST}\n"
