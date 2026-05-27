@@ -82,8 +82,7 @@ git push origin main
 Before pushing, replace "YOUR_USERNAME" in these files:
 
 1. wireguard-pro.sh  — line with REPO_URL:
-   Change:  readonly REPO_URL="https://raw.githubusercontent.com/YOUR_USERNAME/..."
-   To:      readonly REPO_URL="https://raw.githubusercontent.com/YOUR_ACTUAL_NAME/..."
+   Change:  readonly REPO_URL="https://raw.githubusercontent.com/FarooqiEarning/..."
 
 2. README.md — the install commands:
    Change all YOUR_USERNAME to your actual GitHub username
@@ -145,13 +144,13 @@ Before pushing, replace "YOUR_USERNAME" in these files:
 Replace YOUR_USERNAME with your actual GitHub username:
 
 curl:
-  curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/wireguard-pro/main/wireguard-pro.sh | sudo bash
+  curl -fsSL https://raw.githubusercontent.com/FarooqiEarning/wireguard-pro/main/wireguard-pro.sh | sudo bash
 
 wget:
-  wget -qO- https://raw.githubusercontent.com/YOUR_USERNAME/wireguard-pro/main/wireguard-pro.sh | sudo bash
+  wget -qO- https://raw.githubusercontent.com/FarooqiEarning/wireguard-pro/main/wireguard-pro.sh | sudo bash
 
 Download and inspect first (recommended for security):
-  curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/wireguard-pro/main/wireguard-pro.sh -o wg.sh
+  curl -fsSL https://raw.githubusercontent.com/FarooqiEarning/wireguard-pro/main/wireguard-pro.sh -o wg.sh
   less wg.sh           # read through it
   sudo bash wg.sh      # run it
 
@@ -260,6 +259,6 @@ We will respond within 48 hours and work with you on a fix.
 =======================================================================
 
 Your install command will be:
-  curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/wireguard-pro/main/wireguard-pro.sh | sudo bash
+  curl -fsSL https://raw.githubusercontent.com/FarooqiEarning/wireguard-pro/main/wireguard-pro.sh | sudo bash
 
 Share it, get stars, make the world's internet more private! 🌍

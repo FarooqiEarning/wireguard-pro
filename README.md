@@ -17,12 +17,12 @@
 ## ⚡ One-Command Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/wireguard-pro/main/wireguard-pro.sh -o wireguard-pro.sh && sudo bash wireguard-pro.sh
+curl -fsSL https://raw.githubusercontent.com/FarooqiEarning/wireguard-pro/main/wireguard-pro.sh -o wireguard-pro.sh && sudo bash wireguard-pro.sh
 ```
 
 Or with wget:
 ```bash
-wget -qO wireguard-pro.sh https://raw.githubusercontent.com/YOUR_USERNAME/wireguard-pro/main/wireguard-pro.sh && sudo bash wireguard-pro.sh
+wget -qO wireguard-pro.sh https://raw.githubusercontent.com/FarooqiEarning/wireguard-pro/main/wireguard-pro.sh && sudo bash wireguard-pro.sh
 ```
 
 ---

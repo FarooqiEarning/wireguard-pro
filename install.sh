@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # WireGuard Pro — Bootstrap Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/wireguard-pro/main/install.sh | sudo bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/FarooqiEarning/wireguard-pro/main/install.sh | sudo bash
 
 set -e
 
-REPO="YOUR_USERNAME/wireguard-pro"
+REPO="FarooqiEarning/wireguard-pro"
 SCRIPT="wireguard-pro.sh"
 RAW_URL="https://raw.githubusercontent.com/${REPO}/main/${SCRIPT}"
 DEST="/usr/local/bin/${SCRIPT}"

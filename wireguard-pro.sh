@@ -29,7 +29,7 @@ IFS=$'\n\t'
 # ══════════════════════════════════════════════════════════════════════════════
 readonly VER="3.0.0"
 readonly SCRIPT_NAME="wireguard-pro.sh"
-readonly REPO_URL="https://raw.githubusercontent.com/your-repo/wireguard-pro/main/wireguard-pro.sh"
+readonly REPO_URL="https://raw.githubusercontent.com/FarooqiEarning/wireguard-pro/main/wireguard-pro.sh"
 readonly SCRIPT_PID=$$
 
 # ══════════════════════════════════════════════════════════════════════════════
