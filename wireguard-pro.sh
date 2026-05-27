@@ -910,9 +910,9 @@ fw_apply_nat() {
       || ip6tables -t nat -A POSTROUTING -o "$PUBLIC_IFACE" -j MASQUERADE 2>/dev/null || true
   fi
   iptables -C FORWARD -i "${WG_IFACE}" -j ACCEPT 2>/dev/null \
-    || iptables -A FORWARD -i "${WG_IFACE}" -j ACCEPT 2>/dev/null || true
+    || iptables -I FORWARD 1 -i "${WG_IFACE}" -j ACCEPT 2>/dev/null || true
   iptables -C FORWARD -o "${WG_IFACE}" -j ACCEPT 2>/dev/null \
-    || iptables -A FORWARD -o "${WG_IFACE}" -j ACCEPT 2>/dev/null || true
+    || iptables -I FORWARD 1 -o "${WG_IFACE}" -j ACCEPT 2>/dev/null || true
   iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN \
     -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null \
     || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN \
@@ -923,9 +923,9 @@ fw_apply_nat() {
   # but dropped by the FORWARD chain if firewalld injected interface-specific rules.
   ip6tables -P FORWARD ACCEPT 2>/dev/null || true
   ip6tables -C FORWARD -i "${WG_IFACE}" -j ACCEPT 2>/dev/null \
-    || ip6tables -A FORWARD -i "${WG_IFACE}" -j ACCEPT 2>/dev/null || true
+    || ip6tables -I FORWARD 1 -i "${WG_IFACE}" -j ACCEPT 2>/dev/null || true
   ip6tables -C FORWARD -o "${WG_IFACE}" -j ACCEPT 2>/dev/null \
-    || ip6tables -A FORWARD -o "${WG_IFACE}" -j ACCEPT 2>/dev/null || true
+    || ip6tables -I FORWARD 1 -o "${WG_IFACE}" -j ACCEPT 2>/dev/null || true
   # Fix #14: IPv6 TCP MSS clamping (was missing from original)
   ip6tables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN \
     -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null \
@@ -1509,10 +1509,10 @@ ip6tables -P FORWARD ACCEPT; \
 (iptables -C INPUT -p udp --dport ${WG_PORT} -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p udp --dport ${WG_PORT} -j ACCEPT); \
 (ip6tables -C INPUT -p udp --dport ${WG_PORT} -j ACCEPT 2>/dev/null || ip6tables -I INPUT 1 -p udp --dport ${WG_PORT} -j ACCEPT); \
 (iptables -t nat -C POSTROUTING -o ${PUBLIC_IFACE} -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o ${PUBLIC_IFACE} -j MASQUERADE); \
-(iptables -C FORWARD -i %i -j ACCEPT 2>/dev/null || iptables -A FORWARD -i %i -j ACCEPT); \
-(iptables -C FORWARD -o %i -j ACCEPT 2>/dev/null || iptables -A FORWARD -o %i -j ACCEPT); \
-(ip6tables -C FORWARD -i %i -j ACCEPT 2>/dev/null || ip6tables -A FORWARD -i %i -j ACCEPT); \
-(ip6tables -C FORWARD -o %i -j ACCEPT 2>/dev/null || ip6tables -A FORWARD -o %i -j ACCEPT); \
+(iptables -C FORWARD -i %i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i %i -j ACCEPT); \
+(iptables -C FORWARD -o %i -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o %i -j ACCEPT); \
+(ip6tables -C FORWARD -i %i -j ACCEPT 2>/dev/null || ip6tables -I FORWARD 1 -i %i -j ACCEPT); \
+(ip6tables -C FORWARD -o %i -j ACCEPT 2>/dev/null || ip6tables -I FORWARD 1 -o %i -j ACCEPT); \
 (iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu); \
 (ip6tables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || ip6tables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu)"
 
@@ -1587,7 +1587,11 @@ write_client_configs() {
   if [[ "$ALLOWED_IPS_MODE" == "split" ]]; then
     allowed_ips="${WG_NET}.0/24"
   else
-    allowed_ips="0.0.0.0/0, ::/0"
+    if "${IPV6_SUPPORT}"; then
+      allowed_ips="0.0.0.0/0, ::/0"
+    else
+      allowed_ips="0.0.0.0/0"
+    fi
   fi
 
   local i=0
@@ -2317,8 +2321,12 @@ cmd_add_client() {
   printf "  ${C}[1]${RST}  Full tunnel  (all traffic through VPN)  ${Y}← default${RST}\n"
   printf "  ${C}[2]${RST}  Split tunnel (VPN subnet only)\n"
   nl; prompt "Choice [1-2]" "1"
-  local allowed_ips="0.0.0.0/0, ::/0"
-  [[ "${REPLY_VAL:-1}" == "2" ]] && allowed_ips="${WG_NET}.0/24"
+  local allowed_ips="0.0.0.0/0"
+  if [[ "${REPLY_VAL:-1}" == "2" ]]; then
+    allowed_ips="${WG_NET}.0/24"
+  elif grep -q "::/0" "$WG_CONF" 2>/dev/null; then
+    allowed_ips="0.0.0.0/0, ::/0"
+  fi
 
   # Kill switch
   nl; confirm "Enable kill switch for this client?" "n" && local ks=true || local ks=false
