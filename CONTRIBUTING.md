@@ -1,68 +1,432 @@
 # Contributing to WireGuard Pro
 
-Thank you for wanting to make WireGuard Pro better for everyone! 🎉
+Thank you for helping improve WireGuard Pro for everyone! 🎉
 
-## Ways to Contribute
+WireGuard Pro aims to be a production-grade, self-healing, high-performance WireGuard deployment toolkit supporting multiple Linux distributions, cloud providers, and advanced networking environments.
 
-- **Bug reports** — open an Issue with full details
-- **New OS support** — add a `_pkg_xxx` function in §8
-- **Performance tuning** — improve sysctl/qdisc settings in §13
-- **New features** — see ideas below
-- **Documentation** — improve README, add examples
-- **Testing** — test on a new distro and report results
+We welcome contributions of all kinds — bug fixes, testing, documentation, performance improvements, and new features.
 
-## Bug Reports
+---
 
-Please include:
-1. Your OS and version (`cat /etc/os-release`)
-2. Kernel version (`uname -r`)
-3. Cloud provider (AWS, GCP, etc.)
-4. The full log: `cat /var/log/wireguard-pro.log`
-5. Output of: `sudo wg show` and `sudo iptables -L -n`
+# Ways to Contribute
 
-## Pull Request Guidelines
+## 🐛 Bug Reports
 
-1. Fork the repo, create a branch: `git checkout -b feature/my-feature`
-2. Keep functions in the correct § section
-3. Test on at least Ubuntu LTS and CentOS/Rocky
-4. Run `bash -n wireguard-pro.sh` — must show "Syntax OK"
-5. Run `shellcheck wireguard-pro.sh` and fix warnings
-6. Update version number in `VER="x.x.x"` if needed
-7. Describe what you changed and why in the PR
+Open an Issue with:
 
-## Feature Ideas
+* Full reproduction steps
+* Expected behavior
+* Actual behavior
+* Logs and verification output
 
-- [ ] Web dashboard for client management
-- [ ] Telegram/email notification when client connects
-- [ ] Prometheus metrics exporter
-- [ ] Multi-interface support (wg0, wg1, wg2...)
-- [ ] WireGuard over TCP (for restrictive firewalls)
-- [ ] Automatic Let's Encrypt DNS endpoint
-- [ ] Per-client bandwidth limiting
-- [ ] Client expiry / auto-revoke
-- [ ] IPv6-only server support
-- [ ] FreeBSD / macOS server support
+## 🖥️ New OS / Distribution Support
 
-## Code Style
+Add:
 
-- Use `printf` not `echo -e` for portability
-- Always `local` your variables in functions
-- Quote all variable expansions: `"$var"` not `$var`
-- Use `|| true` for non-critical commands that might fail
-- Comment every § section header
+* `_pkg_<distro>()` package installer
+* detection logic
+* firewall compatibility if needed
 
-## Testing Checklist
+Main package logic lives in:
+
+* **§8 Package Management**
+* **§10 OS Detection**
+
+## ⚡ Performance Tuning
+
+Improve:
+
+* sysctl tuning
+* qdisc selection
+* IRQ balancing
+* NIC queue tuning
+* conntrack sizing
+* multi-core packet steering
+
+Primary sections:
+
+* **§13 Performance Profiles**
+* **§14 Kernel & Sysctl Optimization**
+
+## 🔐 Networking & Firewall Improvements
+
+Areas of interest:
+
+* nftables support
+* IPv6 routing
+* policy routing
+* firewall persistence
+* multi-interface routing
+* cloud networking edge cases
+
+Primary sections:
+
+* **§16 Firewall Layer**
+* **§17 NAT & Routing**
+* **§18 WireGuard Runtime**
+
+## 📚 Documentation
+
+Help improve:
+
+* README examples
+* troubleshooting docs
+* cloud-provider guides
+* migration docs
+* architecture diagrams
+
+## 🧪 Testing
+
+We especially need testing on:
+
+* uncommon distros
+* ARM devices
+* VPS providers
+* IPv6-only environments
+* restrictive cloud firewalls
+
+---
+
+# Reporting Bugs
+
+Please include ALL of the following:
+
+## System Information
+
+```bash
+cat /etc/os-release
+uname -r
+```
+
+## Cloud Provider
+
+Examples:
+
+* AWS
+* Oracle Cloud
+* Azure
+* GCP
+* Hetzner
+* DigitalOcean
+* Bare Metal
+
+## Logs
+
+```bash
+cat /var/log/wireguard-pro.log
+```
+
+## Networking State
+
+```bash
+sudo wg show
+sudo iptables -L -n
+sudo ip rule show
+sudo ip route show table all
+```
+
+## Verification Output
+
+```bash
+sudo wireguard-pro --status
+sudo wireguard-pro --repair
+```
+
+## Describe
+
+* What happened
+* What you expected
+* Whether rebooting changes the issue
+* Whether the issue is reproducible
+
+---
+
+# Pull Request Guidelines
+
+## 1. Fork & Branch
+
+```bash
+git checkout -b feature/my-feature
+```
+
+## 2. Keep Functions Organized
+
+All functions belong in the correct numbered section (`§`).
+
+Avoid adding logic in random locations.
+
+## 3. Test Before Submitting
+
+Minimum required:
+
+* Ubuntu 22.04+
+* Rocky Linux / CentOS 9
+
+Preferred:
+
+* Debian
+* Fedora
+* Arch
+* Alpine
+
+## 4. Syntax Validation
+
+```bash
+bash -n wireguard-pro.sh
+```
+
+Must pass cleanly.
+
+## 5. ShellCheck
+
+```bash
+shellcheck wireguard-pro.sh
+```
+
+Fix warnings whenever possible.
+
+## 6. Verify Repair Logic
+
+Test:
+
+```bash
+wireguard-pro --repair
+```
+
+The repair system must remain idempotent and safe to run repeatedly.
+
+## 7. Update Version If Needed
+
+If your PR changes:
+
+* features
+* architecture
+* behavior
+* networking logic
+
+Update:
+
+```bash
+VER="x.x.x"
+```
+
+Also update:
+
+* `CHANGELOG.md`
+* migration notes if applicable
+
+## 8. Explain Your Changes
+
+Describe:
+
+* what changed
+* why it changed
+* edge cases handled
+* rollback considerations
+
+---
+
+# Development Principles
+
+WireGuard Pro prioritizes:
+
+* Reliability over cleverness
+* Idempotent networking operations
+* Cross-distro compatibility
+* Self-healing recovery behavior
+* Safe fallback paths
+* Minimal external dependencies
+
+---
+
+# Code Style
+
+## Shell Standards
+
+* Use `printf` instead of `echo -e`
+* Always quote variables:
+
+```bash
+"$var"
+```
+
+* Use:
+
+```bash
+local var
+```
+
+inside functions
+
+* Use:
+
+```bash
+|| true
+```
+
+for non-critical cleanup commands
+
+## Idempotency
+
+Firewall/networking logic MUST be safely repeatable.
+
+Prefer:
+
+```bash
+iptables -C ... || iptables -A ...
+```
+
+Avoid duplicate rules.
+
+## Error Handling
+
+Critical failures must:
+
+```bash
+die "message"
+```
+
+Never silently continue after fatal networking failures.
+
+## Logging
+
+Use centralized logging helpers.
+
+All recovery actions should produce logs.
+
+---
+
+# Networking Rules
+
+## Policy Routing
+
+Never:
+
+* override global default routes
+* hijack server IPv6 traffic
+* assume a single routing table
+
+Always:
+
+* check before adding `ip rule`
+* validate routes after applying
+
+## Firewall Changes
+
+All firewall operations must support:
+
+* iptables
+* nftables
+* ufw
+* firewalld
+
+Kernel-level fallback rules are preferred for critical VPN access.
+
+## IPv6
+
+Any new networking feature MUST consider:
+
+* IPv4
+* IPv6
+* dual-stack environments
+
+---
+
+# Testing Checklist
 
 Before submitting a PR, verify:
-- [ ] `bash -n wireguard-pro.sh` passes
-- [ ] Fresh install works on Ubuntu 22.04
-- [ ] Fresh install works on CentOS/Rocky 9
-- [ ] Add client works without restarting the service
-- [ ] Remove client properly cleans up server config
-- [ ] Backup/restore round-trip works
-- [ ] `--auto` flag works with zero interaction
-- [ ] `--repair` fixes a deliberately broken setup
 
-## Questions?
+## Installation
 
-Open a Discussion or Issue — we're friendly! 😊
+* [ ] Fresh install works on Ubuntu 22.04+
+* [ ] Fresh install works on Rocky/CentOS 9
+* [ ] Installer succeeds non-interactively with `--auto`
+
+## WireGuard Runtime
+
+* [ ] Interface starts correctly
+* [ ] MTU applies correctly
+* [ ] Clients connect successfully
+* [ ] Hot-add client works without restart
+* [ ] Client revoke/re-enable works
+
+## Routing & Firewall
+
+* [ ] NAT rules persist after reboot
+* [ ] FORWARD chain remains ACCEPT
+* [ ] Policy routing survives restart
+* [ ] IPv6 forwarding works
+* [ ] rp_filter values apply correctly
+
+## Repair & Recovery
+
+* [ ] `--repair` fixes broken firewall state
+* [ ] `--repair` fixes missing routes
+* [ ] `--repair` safely runs multiple times
+
+## Backup & Restore
+
+* [ ] Backup archive restores successfully
+* [ ] Restore preserves client database
+
+## Validation
+
+* [ ] `bash -n wireguard-pro.sh` passes
+* [ ] `shellcheck` passes or warnings justified
+
+---
+
+# Feature Ideas
+
+## Planned
+
+* [ ] Web dashboard for client management
+* [ ] Telegram/email notifications
+* [ ] Multi-interface support (`wg0`, `wg1`, `wg2`)
+* [ ] Per-client bandwidth limits
+* [ ] Client expiry / auto-revoke
+* [ ] Prometheus metrics exporter
+* [ ] REST API
+* [ ] Automatic Let's Encrypt DNS integration
+* [ ] IPv6-only server mode
+* [ ] Clustered/high-availability WireGuard
+* [ ] Smart roaming optimization
+* [ ] eBPF/XDP acceleration
+
+## Experimental
+
+* [ ] WireGuard over TCP
+* [ ] QUIC tunneling mode
+* [ ] Dynamic endpoint failover
+* [ ] Multi-path routing
+* [ ] FreeBSD support
+* [ ] macOS server support
+
+---
+
+# Security Guidelines
+
+Please DO NOT publicly disclose:
+
+* private keys
+* preshared keys
+* client configs
+* internal IP ranges
+* production firewall rules
+
+If reporting a security issue:
+
+* open a private security advisory if possible
+* avoid posting sensitive configs publicly
+
+---
+
+# Questions?
+
+Open:
+
+* a GitHub Issue
+* a Discussion
+* or a Pull Request draft
+
+We're friendly and happy to help. 😊

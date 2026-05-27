@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║                                                                              ║
-# ║   WireGuard Pro  ·  v3.0.0                                                  ║
+# ║   WireGuard Pro  ·  v3.1.0                                                  ║
 # ║   The World's Best WireGuard VPN Installer & Manager                        ║
 # ║                                                                              ║
 # ║   ★ One Command  ★ Any Linux  ★ Any Cloud  ★ Full Lifecycle               ║
@@ -27,7 +27,7 @@ IFS=$'\n\t'
 # ══════════════════════════════════════════════════════════════════════════════
 #  §0  METADATA
 # ══════════════════════════════════════════════════════════════════════════════
-readonly VER="3.0.0"
+readonly VER="3.1.0"
 readonly SCRIPT_NAME="wireguard-pro.sh"
 readonly REPO_URL="https://raw.githubusercontent.com/FarooqiEarning/wireguard-pro/main/wireguard-pro.sh"
 readonly SCRIPT_PID=$$
@@ -521,6 +521,32 @@ detect_network() {
     ip link show "$_iface" &>/dev/null && { PUBLIC_IFACE="${PUBLIC_IFACE:-$_iface}"; break; }
   done
   PUBLIC_IFACE="${PUBLIC_IFACE:-eth0}"
+
+  # ── Fix #3: Hard guard — PUBLIC_IFACE must be non-empty and valid ────────
+  # An empty PUBLIC_IFACE causes MASQUERADE rules like "-o  -j MASQUERADE"
+  # which silently breaks NAT for all clients.
+  [[ -z "$PUBLIC_IFACE" ]] && die "Could not detect a public network interface. Set PUBLIC_IFACE manually."
+
+  # VALIDATE: Public interface must exist and be up
+  if ! ip link show "$PUBLIC_IFACE" &>/dev/null; then
+    # One more attempt: pick first non-loopback UP interface
+    local fallback_iface
+    fallback_iface=$(ip -o link show up 2>/dev/null \
+      | awk -F': ' '$2 !~ /^(lo|wg|veth|docker|br-)/{print $2; exit}')
+    if [[ -n "$fallback_iface" ]] && ip link show "$fallback_iface" &>/dev/null; then
+      warn "Interface $PUBLIC_IFACE not found — using $fallback_iface instead"
+      PUBLIC_IFACE="$fallback_iface"
+    else
+      die "Public interface $PUBLIC_IFACE does not exist. Check your network configuration."
+    fi
+  fi
+
+  # Validate interface is UP
+  if ! ip link show "$PUBLIC_IFACE" 2>/dev/null | grep -q "UP"; then
+    warn "Interface $PUBLIC_IFACE is DOWN — attempting to bring up..."
+    ip link set up "$PUBLIC_IFACE" 2>/dev/null || die "Cannot bring up $PUBLIC_IFACE"
+  fi
+  
   label "Interface" "$PUBLIC_IFACE"
 
   # — Public IPv4 —
@@ -633,6 +659,23 @@ detect_firewall() {
   log "Firewall backend: ${FW_BACKEND}"
 }
 
+# ── Fix #1: _verify_forward_accept ─────────────────────────────────────────
+# Called after every firewall operation that might revert the FORWARD policy.
+# firewalld and ufw can silently reset FORWARD to DROP on reload/restart.
+_verify_forward_accept() {
+  local fwd_policy
+  fwd_policy=$(iptables -L FORWARD 2>/dev/null | head -1 | awk '{print $NF}' | tr -d '()')
+  if [[ "$fwd_policy" != "ACCEPT" ]]; then
+    warn "FORWARD chain reverted to $fwd_policy after firewall op — re-forcing ACCEPT"
+    iptables  -P FORWARD ACCEPT 2>/dev/null || true
+    ip6tables -P FORWARD ACCEPT 2>/dev/null || true
+    # Also flush any explicit DROP rules firewalld may have injected
+    iptables  -D FORWARD -j DROP 2>/dev/null || true
+    ip6tables -D FORWARD -j DROP 2>/dev/null || true
+  fi
+  log "FORWARD policy confirmed: ACCEPT"
+}
+
 # Open a UDP port in the active firewall
 fw_open_udp() {
   local port="$1"
@@ -648,19 +691,224 @@ fw_open_udp() {
       nft add rule inet filter input udp dport "${port}" accept comment '"WireGuard"' 2>/dev/null || true
       log "nftables: opened UDP ${port}" ;;
     *)  # iptables
-      iptables  -I INPUT 1 -p udp --dport "${port}" -j ACCEPT 2>/dev/null || true
-      ip6tables -I INPUT 1 -p udp --dport "${port}" -j ACCEPT 2>/dev/null || true
+      iptables  -C INPUT -p udp --dport "${port}" -j ACCEPT 2>/dev/null \
+        || iptables  -I INPUT 1 -p udp --dport "${port}" -j ACCEPT 2>/dev/null || true
+      ip6tables -C INPUT -p udp --dport "${port}" -j ACCEPT 2>/dev/null \
+        || ip6tables -I INPUT 1 -p udp --dport "${port}" -j ACCEPT 2>/dev/null || true
       log "iptables: opened UDP ${port}" ;;
   esac
+
+  # Fix #5: Always add explicit iptables INPUT backup rules regardless of backend.
+  # ufw/firewalld reload can drop iptables rules; this ensures the port stays open
+  # at the kernel level even if the frontend firewall resets its chain.
+  if [[ "$FW_BACKEND" != "iptables" ]]; then
+    iptables -C INPUT -p udp --dport "${port}" -j ACCEPT 2>/dev/null \
+      || iptables  -I INPUT 1 -p udp --dport "${port}" -j ACCEPT 2>/dev/null || true
+    ip6tables -C INPUT -p udp --dport "${port}" -j ACCEPT 2>/dev/null \
+      || ip6tables -I INPUT 1 -p udp --dport "${port}" -j ACCEPT 2>/dev/null || true
+    log "iptables INPUT backup rule added for UDP ${port}"
+  fi
+
+  # Fix #1: verify FORWARD wasn't reverted by the firewall tool's reload
+  _verify_forward_accept
+}
+
+# Fix #9: Set up policy-based routing for asymmetric paths.
+# Return traffic from VPN clients must route back through wg0, not via the
+# default gateway — otherwise replies go out the wrong interface and are dropped.
+_setup_policy_routing() {
+  # Avoid adding duplicate rules (ip rule add is not idempotent)
+  if ! ip rule show 2>/dev/null | grep -q "from ${WG_NET}.0/24"; then
+    ip rule add from "${WG_NET}.0/24" lookup main priority 100 2>/dev/null || true
+    log "Policy routing rule added: from ${WG_NET}.0/24 lookup main"
+  else
+    log "Policy routing rule already present"
+  fi
+
+  # Ensure the VPN subnet is in the main routing table via the wg interface
+  if ! ip route show 2>/dev/null | grep -q "${WG_NET}.0/24.*${WG_IFACE}"; then
+    ip route add "${WG_NET}.0/24" dev "${WG_IFACE}" 2>/dev/null || true
+    log "Route added: ${WG_NET}.0/24 dev ${WG_IFACE}"
+  fi
+
+  # IPv6 policy routing — only add if IPv6 is enabled AND the interface is up
+  if [[ "$IPV6_SUPPORT" == "true" ]] && ip link show "${WG_IFACE}" &>/dev/null; then
+    # Don't add a ::/0 default route — that would break server internet over IPv6.
+    # Instead just ensure IPv6 forwarding is active.
+    sysctl -w net.ipv6.conf.all.forwarding=1     > /dev/null 2>&1 || true
+    sysctl -w net.ipv6.conf."${WG_IFACE}".forwarding=1 > /dev/null 2>&1 || true
+    log "IPv6 forwarding enabled on ${WG_IFACE}"
+  fi
+
+  log "Policy-based routing configured for ${WG_IFACE}"
+}
+
+# Fix #15: Verify SERVER_VPN_IP is correctly assigned and routable after startup.
+# The IP may fail to assign silently (e.g. if wg-quick used setconf without addr).
+_verify_vpn_ip_routing() {
+  local vpn_ip="${WG_NET}.1"
+
+  # Check the IP is assigned to the interface
+  if ! ip addr show "${WG_IFACE}" 2>/dev/null | grep -q "inet ${vpn_ip}"; then
+    warn "VPN IP ${vpn_ip} not assigned to ${WG_IFACE} — re-assigning"
+    ip address add "${vpn_ip}/24" dev "${WG_IFACE}" 2>/dev/null || true
+  fi
+
+  # Ensure the subnet route exists (wg-quick normally adds this, but manual setup may miss it)
+  if ! ip route show 2>/dev/null | grep -q "${WG_NET}.0/24"; then
+    ip route add "${WG_NET}.0/24" dev "${WG_IFACE}" 2>/dev/null || true
+    log "VPN subnet route added: ${WG_NET}.0/24 dev ${WG_IFACE}"
+  fi
+
+  # Fix #2: Re-apply rp_filter=0 for wg0 AFTER interface exists
+  # (kernel creates per-interface rp_filter entry only when interface is up)
+  echo 0 > "/proc/sys/net/ipv4/conf/${WG_IFACE}/rp_filter" 2>/dev/null || true
+  sysctl -w "net.ipv4.conf.${WG_IFACE}.rp_filter=0" > /dev/null 2>&1 || true
+  log "rp_filter=0 applied to ${WG_IFACE} (post-interface-up)"
+
+  # Ping own VPN IP to confirm routing works
+  if ping -c1 -W2 -I "${WG_IFACE}" "${vpn_ip}" &>/dev/null 2>&1; then
+    log "VPN IP routing verified: ${vpn_ip} reachable on ${WG_IFACE} ✔"
+  else
+    warn "Could not ping own VPN IP ${vpn_ip} on ${WG_IFACE} — check interface config"
+  fi
+}
+
+# Fix #15 (original): Validate VPN subnet doesn't overlap with existing networks
+_validate_vpn_subnet() {
+  local vpn_subnet="$1"
+  
+  # Check if subnet is already in use
+  if ip route show 2>/dev/null | grep -q "$vpn_subnet"; then
+    warn "VPN subnet $vpn_subnet already in routing table — potential overlap"
+    return 1
+  fi
+  
+  # Extract network address
+  local net_addr; net_addr=$(ipcalc "$vpn_subnet" 2>/dev/null | grep "^Network:" | awk '{print $NF}')
+  
+  # Check if any interface has IP in this subnet (rough check)
+  if ip addr show 2>/dev/null | grep -qE "inet ${net_addr%\.0}/"; then
+    warn "VPN subnet $vpn_subnet conflicts with existing interface IP"
+    return 1
+  fi
+  
+  return 0
+}
+
+# Issue #12: Interface state health check
+_check_interface_health() {
+  local iface="$1"
+  
+  # Check if interface exists
+  if ! ip link show "$iface" &>/dev/null 2>&1; then
+    warn "Interface $iface does not exist"
+    return 1
+  fi
+  
+  # Check if interface is UP
+  if ! ip link show "$iface" 2>/dev/null | grep -q "UP"; then
+    warn "Interface $iface is DOWN"
+    return 1
+  fi
+  
+  # Check if interface has IP address
+  if ! ip addr show "$iface" 2>/dev/null | grep -q "inet"; then
+    warn "Interface $iface has no IPv4 address"
+    return 1
+  fi
+  
+  return 0
+}
+
+# Fix #10: Validate DNS servers are reachable from server
+# Uses dig if available, falls back to nslookup, then nc (netcat) for raw UDP probe.
+_validate_dns_servers() {
+  local dns_good=0
+  local dns_fail=0
+
+  if [[ -z "$CLIENT_DNS" ]]; then
+    warn "No DNS servers configured for clients"
+    return 0
+  fi
+
+  # Parse comma-separated DNS servers
+  local dns_list; dns_list=$(echo "$CLIENT_DNS" | tr ',' '\n' \
+    | sed 's/^[[:space:]]*//g' | sed 's/[[:space:]]*$//g')
+
+  # Detect best available DNS query tool
+  local dns_tool=""
+  if command -v dig &>/dev/null;      then dns_tool="dig"
+  elif command -v nslookup &>/dev/null; then dns_tool="nslookup"
+  elif command -v nc &>/dev/null;       then dns_tool="nc"
+  else                                       dns_tool="none"; fi
+  log "DNS validation tool: ${dns_tool}"
+
+  step "Validating DNS servers (tool: ${dns_tool})..."
+  while IFS= read -r dns_server; do
+    [[ -z "$dns_server" ]] && continue
+    local reachable=false
+
+    case "$dns_tool" in
+      dig)
+        timeout 3 dig +short +tries=1 +timeout=2 @"$dns_server" google.com A \
+          &>/dev/null 2>&1 && reachable=true ;;
+      nslookup)
+        timeout 3 nslookup -timeout=2 google.com "$dns_server" \
+          &>/dev/null 2>&1 && reachable=true ;;
+      nc)
+        # Probe UDP port 53 — just checks connectivity, not full resolution
+        echo "" | timeout 2 nc -u -w1 "$dns_server" 53 \
+          &>/dev/null 2>&1 && reachable=true ;;
+      none)
+        # Last resort: ping the DNS server IP
+        ping -c1 -W2 "$dns_server" &>/dev/null 2>&1 && reachable=true ;;
+    esac
+
+    if [[ "$reachable" == "true" ]]; then
+      log "DNS ✔ ${dns_server} is reachable"
+      ((dns_good++)) || true
+    else
+      warn "DNS ✘ ${dns_server} is NOT reachable from server — clients may fail to resolve"
+      ((dns_fail++)) || true
+    fi
+  done <<< "$dns_list"
+
+  if [[ $dns_fail -gt 0 ]]; then
+    warn "$dns_fail DNS server(s) unreachable — consider using 1.1.1.1 or 8.8.8.8"
+  else
+    log "All DNS servers reachable ✔"
+  fi
 }
 
 # Apply NAT masquerade + forward rules
 fw_apply_nat() {
   # Always use iptables for NAT (firewalld/ufw call iptables underneath)
+  # Verify and set FORWARD chain policy to ACCEPT
   iptables -P FORWARD ACCEPT 2>/dev/null || true
   ip6tables -P FORWARD ACCEPT 2>/dev/null || true
+  
+  # Validate FORWARD chain is actually ACCEPT (firewalld might override)
+  local fwd_policy; fwd_policy=$(iptables -L FORWARD 2>/dev/null | head -1 | awk '{print $2}')
+  if [[ "$fwd_policy" != "ACCEPT" ]]; then
+    warn "FORWARD chain policy is $fwd_policy — forcing ACCEPT"
+    iptables -F FORWARD 2>/dev/null || true
+    iptables -P FORWARD ACCEPT 2>/dev/null || true
+  fi
+  
+  # Ensure INPUT chain accepts VPN port (backup for firewall tools)
+  iptables -C INPUT -p udp --dport "${WG_PORT}" -j ACCEPT 2>/dev/null \
+    || iptables -I INPUT 1 -p udp --dport "${WG_PORT}" -j ACCEPT 2>/dev/null || true
+  ip6tables -C INPUT -p udp --dport "${WG_PORT}" -j ACCEPT 2>/dev/null \
+    || ip6tables -I INPUT 1 -p udp --dport "${WG_PORT}" -j ACCEPT 2>/dev/null || true
+  
   iptables -t nat  -C POSTROUTING -o "$PUBLIC_IFACE" -j MASQUERADE 2>/dev/null \
     || iptables -t nat -A POSTROUTING -o "$PUBLIC_IFACE" -j MASQUERADE 2>/dev/null || true
+  # IPv6 NAT (if kernel supports nat table for ip6tables)
+  if ip6tables -t nat -L >/dev/null 2>&1; then
+    ip6tables -t nat -C POSTROUTING -o "$PUBLIC_IFACE" -j MASQUERADE 2>/dev/null \
+      || ip6tables -t nat -A POSTROUTING -o "$PUBLIC_IFACE" -j MASQUERADE 2>/dev/null || true
+  fi
   iptables -C FORWARD -i "${WG_IFACE}" -j ACCEPT 2>/dev/null \
     || iptables -A FORWARD -i "${WG_IFACE}" -j ACCEPT 2>/dev/null || true
   iptables -C FORWARD -o "${WG_IFACE}" -j ACCEPT 2>/dev/null \
@@ -669,15 +917,41 @@ fw_apply_nat() {
     -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null \
     || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN \
     -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+
+  # Fix #6: IPv6 FORWARD rules for wg interface (was missing — only policy was set)
+  # Without these, IPv6 traffic through the VPN tunnel is forwarded by policy
+  # but dropped by the FORWARD chain if firewalld injected interface-specific rules.
+  ip6tables -P FORWARD ACCEPT 2>/dev/null || true
+  ip6tables -C FORWARD -i "${WG_IFACE}" -j ACCEPT 2>/dev/null \
+    || ip6tables -A FORWARD -i "${WG_IFACE}" -j ACCEPT 2>/dev/null || true
+  ip6tables -C FORWARD -o "${WG_IFACE}" -j ACCEPT 2>/dev/null \
+    || ip6tables -A FORWARD -o "${WG_IFACE}" -j ACCEPT 2>/dev/null || true
+  # Fix #14: IPv6 TCP MSS clamping (was missing from original)
+  ip6tables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN \
+    -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null \
+    || ip6tables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN \
+    -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+
+  # Fix #1: re-verify FORWARD wasn't silently reverted during rule insertion
+  _verify_forward_accept
+
   log "NAT masquerade + FORWARD rules applied"
 }
 
 # Remove NAT rules (for uninstall)
 fw_remove_nat() {
   iptables -t nat  -D POSTROUTING -o "$PUBLIC_IFACE" -j MASQUERADE 2>/dev/null || true
+  if ip6tables -t nat -L >/dev/null 2>&1; then
+    ip6tables -t nat -D POSTROUTING -o "$PUBLIC_IFACE" -j MASQUERADE 2>/dev/null || true
+  fi
   iptables -D FORWARD -i "${WG_IFACE}" -j ACCEPT 2>/dev/null || true
   iptables -D FORWARD -o "${WG_IFACE}" -j ACCEPT 2>/dev/null || true
   iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN \
+    -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+  # Remove IPv6 FORWARD rules added by Fix #6
+  ip6tables -D FORWARD -i "${WG_IFACE}" -j ACCEPT 2>/dev/null || true
+  ip6tables -D FORWARD -o "${WG_IFACE}" -j ACCEPT 2>/dev/null || true
+  ip6tables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN \
     -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
 }
 
@@ -698,19 +972,104 @@ fw_close_udp() {
 
 # Persist firewall rules across reboots
 fw_save() {
+  local persist_ok=0
   case "$FW_BACKEND" in
-    ufw)      ufw reload 2>/dev/null || true ;;
-    firewalld) firewall-cmd --reload 2>/dev/null || true ;;
+    ufw)
+      if ufw reload 2>/dev/null; then
+        persist_ok=1
+        log "ufw rules persisted"
+      else
+        warn "ufw reload failed — rules may not persist after reboot"
+      fi
+      # Fix #1/#8: ufw reload can revert FORWARD policy — re-verify immediately
+      _verify_forward_accept ;;
+    firewalld)
+      if firewall-cmd --reload 2>/dev/null; then
+        persist_ok=1
+        log "firewalld rules persisted"
+      else
+        warn "firewall-cmd reload failed — rules may not persist after reboot"
+      fi
+      # Fix #1/#8: firewalld reload is the most common FORWARD-reverter
+      _verify_forward_accept ;;
     *)
       if command -v netfilter-persistent &>/dev/null; then
-        netfilter-persistent save 2>/dev/null || true
+        if netfilter-persistent save 2>/dev/null; then
+          persist_ok=1
+          log "Rules persisted with netfilter-persistent"
+        else
+          warn "netfilter-persistent save failed"
+        fi
       elif command -v iptables-save &>/dev/null; then
         mkdir -p /etc/iptables
-        iptables-save  > /etc/iptables/rules.v4 2>/dev/null || true
-        ip6tables-save > /etc/iptables/rules.v6 2>/dev/null || true
+        if iptables-save  > /etc/iptables/rules.v4 2>/dev/null && \
+           ip6tables-save > /etc/iptables/rules.v6 2>/dev/null; then
+          persist_ok=1
+          log "Rules saved to /etc/iptables/"
+          # Verify the save actually contains our MASQUERADE rule
+          if ! grep -q "MASQUERADE" /etc/iptables/rules.v4 2>/dev/null; then
+            warn "Saved rules.v4 missing MASQUERADE — re-saving..."
+            iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+          fi
+        else
+          warn "iptables-save failed — rules will be lost on reboot"
+        fi
+      else
+        warn "No persistence method available — installing fallback systemd restore service"
       fi ;;
   esac
-  log "Firewall rules persisted"
+
+  # Fix #8: Fallback persistence — write a systemd one-shot that re-applies
+  # rules on boot. This covers systems where netfilter-persistent isn't installed
+  # and ensures rules survive reboots on any distro.
+  local rules_script="/usr/local/sbin/wg-restore-rules.sh"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf '# WireGuard Pro — firewall restore on boot (auto-generated)\n'
+    printf 'iptables  -P FORWARD ACCEPT 2>/dev/null || true\n'
+    printf 'ip6tables -P FORWARD ACCEPT 2>/dev/null || true\n'
+    printf 'echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null || true\n'
+    printf 'echo 1 > /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || true\n'
+    printf 'iptables -C INPUT -p udp --dport %s -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p udp --dport %s -j ACCEPT\n' \
+      "${WG_PORT}" "${WG_PORT}"
+    printf 'ip6tables -C INPUT -p udp --dport %s -j ACCEPT 2>/dev/null || ip6tables -I INPUT 1 -p udp --dport %s -j ACCEPT\n' \
+      "${WG_PORT}" "${WG_PORT}"
+    printf 'iptables -t nat -C POSTROUTING -o %s -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o %s -j MASQUERADE\n' \
+      "${PUBLIC_IFACE}" "${PUBLIC_IFACE}"
+    printf 'iptables -C FORWARD -i %s -j ACCEPT 2>/dev/null || iptables -A FORWARD -i %s -j ACCEPT\n' \
+      "${WG_IFACE}" "${WG_IFACE}"
+    printf 'iptables -C FORWARD -o %s -j ACCEPT 2>/dev/null || iptables -A FORWARD -o %s -j ACCEPT\n' \
+      "${WG_IFACE}" "${WG_IFACE}"
+    printf 'ip6tables -C FORWARD -i %s -j ACCEPT 2>/dev/null || ip6tables -A FORWARD -i %s -j ACCEPT\n' \
+      "${WG_IFACE}" "${WG_IFACE}"
+    printf 'ip6tables -C FORWARD -o %s -j ACCEPT 2>/dev/null || ip6tables -A FORWARD -o %s -j ACCEPT\n' \
+      "${WG_IFACE}" "${WG_IFACE}"
+  } > "$rules_script" 2>/dev/null && chmod 700 "$rules_script"
+
+  # Write the systemd unit only if systemd is available
+  if command -v systemctl &>/dev/null && [[ -d /etc/systemd/system ]]; then
+    cat > /etc/systemd/system/wg-restore-rules.service 2>/dev/null << UNIT
+[Unit]
+Description=WireGuard Pro — Restore Firewall Rules
+After=network-online.target
+Wants=network-online.target
+Before=wg-quick@${WG_IFACE}.service
+
+[Service]
+Type=oneshot
+ExecStart=${rules_script}
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    systemctl daemon-reload  2>/dev/null || true
+    systemctl enable wg-restore-rules.service 2>/dev/null && \
+      log "Systemd boot-restore service enabled: wg-restore-rules" || true
+    persist_ok=1
+  fi
+
+  [[ $persist_ok -eq 0 ]] && warn "Firewall rules may not be persistent after reboot"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -788,8 +1147,8 @@ net.ipv4.tcp_no_metrics_save           = 1
 # ── Connection tracking ──
 net.netfilter.nf_conntrack_max         = 1048576
 net.netfilter.nf_conntrack_tcp_timeout_established = 7440
-net.netfilter.nf_conntrack_udp_timeout = 30
-net.netfilter.nf_conntrack_udp_timeout_stream = 120
+net.netfilter.nf_conntrack_udp_timeout = 300
+net.netfilter.nf_conntrack_udp_timeout_stream = 432000
 
 # ── Security hardening ──
 net.ipv4.conf.all.accept_redirects     = 0
@@ -797,8 +1156,9 @@ net.ipv4.conf.default.accept_redirects = 0
 net.ipv4.conf.all.send_redirects       = 0
 net.ipv4.conf.default.send_redirects   = 0
 net.ipv4.conf.all.accept_source_route  = 0
-net.ipv4.conf.all.rp_filter            = 1
-net.ipv4.conf.default.rp_filter        = 1
+net.ipv4.conf.all.rp_filter            = 2
+net.ipv4.conf.default.rp_filter        = 2
+net.ipv4.conf.${WG_IFACE}.rp_filter    = 0
 net.ipv4.icmp_echo_ignore_broadcasts   = 1
 net.ipv4.icmp_ignore_bogus_error_responses = 1
 
@@ -846,14 +1206,40 @@ BALANCED
   chmod 644 "$sysctl_file"
   log "Sysctl config written: $sysctl_file"
 
+  # Fix #7/#13: Load nf_conntrack module before trying to set its parameters.
+  # Without this, sysctl -w net.netfilter.* silently fails on a fresh boot.
+  modprobe nf_conntrack 2>/dev/null || modprobe ip_conntrack 2>/dev/null || true
+  # Persist the module load
+  echo "nf_conntrack" >> /etc/modules-load.d/wireguard.conf 2>/dev/null || true
+
   # Apply immediately
   sysctl --system > /dev/null 2>&1 || sysctl -p "$sysctl_file" > /dev/null 2>&1 || true
 
   # Force-apply critical params now
   sysctl -w net.ipv4.ip_forward=1               > /dev/null 2>&1 || true
   sysctl -w net.ipv6.conf.all.forwarding=1       > /dev/null 2>&1 || true
+  sysctl -w net.ipv6.conf.default.forwarding=1   > /dev/null 2>&1 || true
   sysctl -w net.core.default_qdisc=fq_codel      > /dev/null 2>&1 || true
   sysctl -w net.ipv4.tcp_congestion_control=bbr  > /dev/null 2>&1 || true
+
+  # Fix #2: Force-apply rp_filter immediately (sysctl --system may not apply new
+  # per-interface keys like net.ipv4.conf.wg0.rp_filter until the interface exists).
+  # rp_filter=1 (strict) drops asymmetric WireGuard return packets as "spoofed".
+  # rp_filter=2 (loose) allows asymmetric routing required by VPN.
+  sysctl -w net.ipv4.conf.all.rp_filter=2     > /dev/null 2>&1 || true
+  sysctl -w net.ipv4.conf.default.rp_filter=2 > /dev/null 2>&1 || true
+  # wg0 gets rp_filter=0 (disabled) — will also be applied after interface creation
+  sysctl -w "net.ipv4.conf.${WG_IFACE}.rp_filter=0" > /dev/null 2>&1 || true
+  # Also write directly to /proc in case sysctl -w is rejected before interface exists
+  echo 2 > /proc/sys/net/ipv4/conf/all/rp_filter     2>/dev/null || true
+  echo 2 > /proc/sys/net/ipv4/conf/default/rp_filter 2>/dev/null || true
+  log "rp_filter: all=2 default=2 ${WG_IFACE}=0 (loose mode — required for VPN asymmetric routing)"
+
+  # Fix #13: Connection-tracking timeouts — UDP timeout must exceed keepalive interval.
+  # Default kernel UDP conntrack timeout is only 30s; WireGuard keepalive is 25s,
+  # meaning a single dropped keepalive would expire the conntrack entry.
+  sysctl -w net.netfilter.nf_conntrack_udp_timeout=300        > /dev/null 2>&1 || true
+  sysctl -w net.netfilter.nf_conntrack_udp_timeout_stream=432000 > /dev/null 2>&1 || true
 
   # Verify ip_forward
   local fwd; fwd=$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || echo "0")
@@ -863,6 +1249,18 @@ BALANCED
     echo 1 > /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || true
   fi
   log "IPv4 forwarding: $(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)"
+
+  # Fix #7: Verify nf_conntrack_max is adequate (module must be loaded first)
+  local ct_max; ct_max=$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null || echo "0")
+  if [[ -z "$ct_max" ]] || [[ "$ct_max" -lt 1048576 ]]; then
+    warn "nf_conntrack_max=${ct_max:-unavailable} (need 1048576+) — attempting increase"
+    sysctl -w net.netfilter.nf_conntrack_max=1048576 > /dev/null 2>&1 \
+      || echo 1048576 > /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null || true
+    ct_max=$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null || echo "unknown")
+    log "nf_conntrack_max after fix: ${ct_max}"
+  else
+    log "nf_conntrack_max: ${ct_max} (sufficient)"
+  fi
 
   # ── CPU governor → performance (reduces latency on VMs too) ─────────────
   if [[ -d /sys/devices/system/cpu/cpu0/cpufreq ]]; then
@@ -945,6 +1343,17 @@ install_packages() {
 
   # QR code generation
   pkg_install "false" "qrencode"
+
+  # Fix #10: DNS validation tools (dig preferred, nslookup fallback)
+  if [[ "$IS_APT" == "true" ]]; then
+    pkg_install "false" "dnsutils"
+  elif [[ "$IS_PACMAN" == "true" ]]; then
+    pkg_install "false" "bind"
+  elif [[ "$IS_APK" == "true" ]]; then
+    pkg_install "false" "bind-tools"
+  else
+    pkg_install "false" "bind-utils"
+  fi
 
   # iptables-legacy: needed on Ubuntu 22+ / Debian 11+ using nftables
   if [[ "$IS_APT" == "true" ]] && command -v iptables-legacy &>/dev/null; then
@@ -1086,16 +1495,37 @@ write_server_config() {
 
   mkdir -p "$WG_DIR" && chmod 700 "$WG_DIR"
 
-  # PostUp/PostDown: single line each (semicolons), handles cloud/oracle drops
-  local postup="sysctl -w net.ipv4.ip_forward=1; iptables -P FORWARD ACCEPT; \
-iptables -t nat -A POSTROUTING -o ${PUBLIC_IFACE} -j MASQUERADE; \
-iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; \
-iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"
+  # PostUp/PostDown: idempotent check-before-add pattern (Fix #11).
+  # Also applies rp_filter=0 for wg0 on every bring-up (Fix #2),
+  # and adds ip6tables FORWARD + MSS rules (Fixes #6 #14).
+  local postup="\
+sysctl -w net.ipv4.ip_forward=1; \
+sysctl -w net.ipv6.conf.all.forwarding=1; \
+sysctl -w net.ipv4.conf.all.rp_filter=2; \
+sysctl -w net.ipv4.conf.${PUBLIC_IFACE}.rp_filter=2; \
+sysctl -w net.ipv4.conf.%i.rp_filter=0; \
+iptables -P FORWARD ACCEPT; \
+ip6tables -P FORWARD ACCEPT; \
+(iptables -C INPUT -p udp --dport ${WG_PORT} -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p udp --dport ${WG_PORT} -j ACCEPT); \
+(ip6tables -C INPUT -p udp --dport ${WG_PORT} -j ACCEPT 2>/dev/null || ip6tables -I INPUT 1 -p udp --dport ${WG_PORT} -j ACCEPT); \
+(iptables -t nat -C POSTROUTING -o ${PUBLIC_IFACE} -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o ${PUBLIC_IFACE} -j MASQUERADE); \
+(iptables -C FORWARD -i %i -j ACCEPT 2>/dev/null || iptables -A FORWARD -i %i -j ACCEPT); \
+(iptables -C FORWARD -o %i -j ACCEPT 2>/dev/null || iptables -A FORWARD -o %i -j ACCEPT); \
+(ip6tables -C FORWARD -i %i -j ACCEPT 2>/dev/null || ip6tables -A FORWARD -i %i -j ACCEPT); \
+(ip6tables -C FORWARD -o %i -j ACCEPT 2>/dev/null || ip6tables -A FORWARD -o %i -j ACCEPT); \
+(iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu); \
+(ip6tables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || ip6tables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu)"
 
-  local postdown="iptables -P FORWARD ACCEPT; \
-iptables -t nat -D POSTROUTING -o ${PUBLIC_IFACE} -j MASQUERADE; \
-iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; \
-iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"
+  local postdown="\
+iptables -P FORWARD ACCEPT; \
+ip6tables -P FORWARD ACCEPT; \
+iptables -t nat -D POSTROUTING -o ${PUBLIC_IFACE} -j MASQUERADE 2>/dev/null || true; \
+iptables -D FORWARD -i %i -j ACCEPT 2>/dev/null || true; \
+iptables -D FORWARD -o %i -j ACCEPT 2>/dev/null || true; \
+ip6tables -D FORWARD -i %i -j ACCEPT 2>/dev/null || true; \
+ip6tables -D FORWARD -o %i -j ACCEPT 2>/dev/null || true; \
+iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true; \
+ip6tables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true"
 
   {
     printf '# ══════════════════════════════════════════════════════════════════════\n'
@@ -1228,7 +1658,10 @@ start_wireguard() {
 
     if wg_is_running; then
       log "WireGuard started (attempt ${attempt})"
-      WG_START_OK=true; break
+      WG_START_OK=true
+      # Fix #9: policy routing must be set up after every successful start
+      _setup_policy_routing
+      break
     fi
 
     [[ $attempt -lt $max_attempts ]] && _auto_repair "$attempt"
@@ -1242,17 +1675,22 @@ start_wireguard() {
     if wg-quick up "${WG_IFACE}" 2>/dev/null; then
       log "WireGuard started via wg-quick directly"
       WG_START_OK=true
+      _setup_policy_routing   # Fix #9
     fi
   fi
 
   # Fallback 2: manual ip + wg setconf
   if [[ "$WG_START_OK" != "true" ]]; then
     warn "Attempting manual interface configuration..."
-    ip link add  dev "${WG_IFACE}" type wireguard 2>/dev/null || true
-    wg setconf      "${WG_IFACE}" "${WG_CONF}" 2>/dev/null || true
+    ip link add dev "${WG_IFACE}" type wireguard 2>/dev/null || true
+    # Fix #4: use the wizard-selected MTU ($MTU), not the auto-detected default.
+    # Using DETECTED_MTU here bypassed profile overrides (e.g. gaming=1280).
+    ip link set mtu "${MTU:-1420}" dev "${WG_IFACE}" 2>/dev/null || true
+    wg setconf "${WG_IFACE}" "${WG_CONF}" 2>/dev/null || true
     ip address add  "${WG_NET}.1/24" dev "${WG_IFACE}" 2>/dev/null || true
     ip link set up  dev "${WG_IFACE}" 2>/dev/null || true
     fw_apply_nat
+    _setup_policy_routing   # Fix #9
     ip link show "${WG_IFACE}" &>/dev/null && WG_START_OK=true
     [[ "$WG_START_OK" == "true" ]] && log "WireGuard configured manually"
   fi
@@ -1260,6 +1698,12 @@ start_wireguard() {
   if [[ "$WG_START_OK" != "true" ]]; then
     warn "WireGuard could not start automatically"
     warn "Debug: journalctl -xeu wg-quick@${WG_IFACE} --no-pager -n 50"
+  fi
+
+  # Fix #2/#15: apply rp_filter=0 to wg0 and verify VPN IP routing now that
+  # the interface is up (kernel creates per-interface entries at this point)
+  if ip link show "${WG_IFACE}" &>/dev/null; then
+    _verify_vpn_ip_routing
   fi
 
   # Apply qdisc to wg interface
@@ -1396,6 +1840,18 @@ verify_internet_routing() {
     fi
   fi
 
+  # 6. Fix #6: IPv6 forwarding verification
+  local ip6fwd; ip6fwd=$(cat /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || echo "0")
+  if [[ "$ip6fwd" != "1" ]]; then
+    warn "IPv6 forwarding=0 — enabling"
+    sysctl -w net.ipv6.conf.all.forwarding=1     > /dev/null 2>&1 || true
+    sysctl -w net.ipv6.conf.default.forwarding=1 > /dev/null 2>&1 || true
+    echo 1 > /proc/sys/net/ipv6/conf/all/forwarding     2>/dev/null || true
+    echo 1 > /proc/sys/net/ipv6/conf/default/forwarding 2>/dev/null || true
+    ((fixed++)) || true
+  fi
+  log "IPv6 forwarding: $(cat /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null)"
+
   if [[ $fixed -eq 0 ]]; then
     log "Internet routing: all checks passed ✔"
   else
@@ -1403,6 +1859,8 @@ verify_internet_routing() {
   fi
 
   fw_save
+  # Fix #1: fw_save (ufw reload / firewalld reload) can revert FORWARD — verify again
+  _verify_forward_accept
 
   # Test internet from server
   if curl -sk -m 3 https://1.1.1.1 > /dev/null 2>&1; then
@@ -1459,17 +1917,25 @@ run_verification() {
   }
 
   local ok=0
-  ip link show "${WG_IFACE}" &>/dev/null                           && ok=1; _chk "Interface ${WG_IFACE} exists"     $ok; ok=0
-  systemctl is-active --quiet "wg-quick@${WG_IFACE}" 2>/dev/null  && ok=1; _chk "Systemd service active"            $ok "check: journalctl -xeu wg-quick@${WG_IFACE}"; ok=0
-  [[ "$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)" == "1" ]] && ok=1; _chk "IPv4 forwarding enabled"           $ok; ok=0
-  iptables -t nat -L POSTROUTING -n 2>/dev/null | grep -q "MASQUERADE" && ok=1; _chk "NAT masquerade active"     $ok "needed for client internet"; ok=0
-  iptables -L FORWARD 2>/dev/null | head -1 | grep -q "ACCEPT"    && ok=1; _chk "FORWARD chain: ACCEPT"            $ok "critical — run: iptables -P FORWARD ACCEPT"; ok=0
-  ss -uln 2>/dev/null | grep -q ":${WG_PORT} "                    && ok=1; _chk "UDP port ${WG_PORT} listening"     $ok; ok=0
-  [[ -f "${WG_CONF}" ]]                                            && ok=1; _chk "Server config exists"             $ok; ok=0
+  ip link show "${WG_IFACE}" &>/dev/null                                && ok=1; _chk "Interface ${WG_IFACE} exists"       $ok; ok=0
+  systemctl is-active --quiet "wg-quick@${WG_IFACE}" 2>/dev/null        && ok=1; _chk "Systemd service active"              $ok "check: journalctl -xeu wg-quick@${WG_IFACE}"; ok=0
+  [[ "$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)" == "1" ]]       && ok=1; _chk "IPv4 forwarding enabled"             $ok; ok=0
+  [[ "$(cat /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null)" == "1" ]] && ok=1; _chk "IPv6 forwarding enabled"          $ok "run: sysctl -w net.ipv6.conf.all.forwarding=1"; ok=0
+  iptables -t nat -L POSTROUTING -n 2>/dev/null | grep -q "MASQUERADE"  && ok=1; _chk "NAT masquerade active"               $ok "needed for client internet"; ok=0
+  iptables -L FORWARD 2>/dev/null | head -1 | grep -q "ACCEPT"          && ok=1; _chk "FORWARD chain: ACCEPT"               $ok "critical — run: iptables -P FORWARD ACCEPT"; ok=0
+  ss -uln 2>/dev/null | grep -q ":${WG_PORT} "                          && ok=1; _chk "UDP port ${WG_PORT} listening"       $ok; ok=0
+  [[ -f "${WG_CONF}" ]]                                                  && ok=1; _chk "Server config exists"               $ok; ok=0
   [[ -f "${CLIENT_DIR}/${CLIENT_NAMES[0]:-client1}.conf" ]] || \
-  [[ -f "${CLIENT_DIR}/client1.conf" ]]                            && ok=1; _chk "Client config(s) exist"           $ok; ok=0
-  ! grep -qE '^server$|^client$' "${WG_CONF}" 2>/dev/null         && ok=1; _chk "Config format valid"              $ok; ok=0
-  [[ -f "$DB_FILE" ]]                                              && ok=1; _chk "Client database exists"           $ok; ok=0
+  [[ -f "${CLIENT_DIR}/client1.conf" ]]                                  && ok=1; _chk "Client config(s) exist"             $ok; ok=0
+  ! grep -qE '^server$|^client$' "${WG_CONF}" 2>/dev/null               && ok=1; _chk "Config format valid"                $ok; ok=0
+  [[ -f "$DB_FILE" ]]                                                    && ok=1; _chk "Client database exists"             $ok; ok=0
+  # Fix #2: rp_filter check
+  local rp; rp=$(cat /proc/sys/net/ipv4/conf/all/rp_filter 2>/dev/null || echo "?")
+  [[ "$rp" != "1" ]]  && ok=1; _chk "rp_filter ≠ 1 (loose/off mode)"   $ok "strict rp_filter=1 drops VPN return packets — fix: sysctl -w net.ipv4.conf.all.rp_filter=2"; ok=0
+  # Fix #12: interface health check
+  _check_interface_health "${WG_IFACE}" 2>/dev/null                      && ok=1; _chk "Interface ${WG_IFACE} healthy"     $ok "UP + has IPv4 addr"; ok=0
+  # Fix #15: VPN server IP assigned
+  ip addr show "${WG_IFACE}" 2>/dev/null | grep -q "inet ${WG_NET}.1"   && ok=1; _chk "Server VPN IP ${WG_NET}.1 assigned" $ok "run: ip addr add ${WG_NET}.1/24 dev ${WG_IFACE}"; ok=0
 
   nl; hr
   local total=$((pass+fail))
@@ -1607,6 +2073,7 @@ _dns_menu() {
     *) CLIENT_DNS="1.1.1.1, 1.0.0.1" ;;
   esac
   log "DNS: ${CLIENT_DNS}"
+  _validate_dns_servers  # Issue #10: Check that DNS servers are reachable
 }
 
 _perf_menu() {
@@ -1627,6 +2094,9 @@ _perf_menu() {
 run_install_wizard() {
   local RANDOM_PORT; RANDOM_PORT=$(pick_random_port)
   SERVER_VPN_IP="${WG_NET}.1"
+  
+  # Issue #15: Validate SERVER_VPN_IP doesn't overlap with existing networks
+  _validate_vpn_subnet "${WG_NET}.0/24" || warn "VPN subnet may overlap with existing networks — review your setup"
 
   # ── Mode selection ──────────────────────────────────────────────────────
   nl; dhr
@@ -2203,9 +2673,16 @@ cmd_repair() {
   wg-quick down   "${WG_IFACE}" 2>/dev/null || true
   ip link delete  "${WG_IFACE}" 2>/dev/null || true
 
-  step "Re-applying firewall rules..."
-  iptables -P FORWARD ACCEPT 2>/dev/null || true
+  step "Re-applying kernel parameters..."
+  # Fix #2: ensure rp_filter is in loose mode before restart
+  sysctl -w net.ipv4.conf.all.rp_filter=2     > /dev/null 2>&1 || true
+  sysctl -w net.ipv4.conf.default.rp_filter=2 > /dev/null 2>&1 || true
   echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null || true
+  echo 1 > /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || true
+
+  step "Re-applying firewall rules..."
+  iptables  -P FORWARD ACCEPT 2>/dev/null || true
+  ip6tables -P FORWARD ACCEPT 2>/dev/null || true
   fw_apply_nat
 
   step "Restarting WireGuard..."
@@ -2214,15 +2691,27 @@ cmd_repair() {
     sleep 2
     if wg_is_running; then
       log "WireGuard repaired and running ✔"
+      # Fix #9: re-apply policy routing after restart
+      _setup_policy_routing
+      # Fix #15: verify VPN IP is assigned and rp_filter=0 on wg0
+      _verify_vpn_ip_routing
+      # Fix #12: interface health check
+      _check_interface_health "${WG_IFACE}" || warn "Interface health check failed"
     else
       warn "Service started but interface not up — trying wg-quick directly"
-      wg-quick up "${WG_IFACE}" 2>/dev/null && log "WireGuard up via wg-quick" || \
-        warn "Failed — check: journalctl -xeu wg-quick@${WG_IFACE} --no-pager"
+      wg-quick up "${WG_IFACE}" 2>/dev/null && {
+        log "WireGuard up via wg-quick"
+        _setup_policy_routing
+        _verify_vpn_ip_routing
+      } || warn "Failed — check: journalctl -xeu wg-quick@${WG_IFACE} --no-pager"
     fi
   else
     warn "systemctl failed — trying wg-quick directly"
-    wg-quick up "${WG_IFACE}" 2>/dev/null && log "WireGuard up via wg-quick" || \
-      warn "Failed — check: journalctl -xeu wg-quick@${WG_IFACE} --no-pager"
+    wg-quick up "${WG_IFACE}" 2>/dev/null && {
+      log "WireGuard up via wg-quick"
+      _setup_policy_routing
+      _verify_vpn_ip_routing
+    } || warn "Failed — check: journalctl -xeu wg-quick@${WG_IFACE} --no-pager"
   fi
 
   step "Re-applying performance optimizations..."
@@ -2230,8 +2719,10 @@ cmd_repair() {
   [[ -f "$sysctl_file" ]] && sysctl -p "$sysctl_file" > /dev/null 2>&1 || true
   sysctl -w net.ipv4.ip_forward=1 > /dev/null 2>&1 || true
   tc qdisc del dev "${WG_IFACE}" root 2>/dev/null || true
-  tc qdisc add dev "${WG_IFACE}" root fq_codel  2>/dev/null || true
+  tc qdisc add dev "${WG_IFACE}" root fq_codel 2>/dev/null || true
   fw_save
+  # Fix #1: fw_save may have triggered a firewalld/ufw reload — re-verify FORWARD
+  _verify_forward_accept
 
   verify_internet_routing
 }

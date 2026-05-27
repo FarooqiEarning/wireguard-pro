@@ -1,7 +1,7 @@
 # WireGuard Pro — World's Best VPN Installer & Manager
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.0.0-blue?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/version-3.1.0-blue?style=for-the-badge" />
   <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" />
   <img src="https://img.shields.io/badge/bash-4.0%2B-orange?style=for-the-badge" />
   <img src="https://img.shields.io/badge/WireGuard-ready-purple?style=for-the-badge" />
